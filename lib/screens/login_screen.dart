@@ -1,8 +1,10 @@
+// lib/login_screen.dart
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../constants/colors.dart';
 import 'register_screen.dart';
 import 'main_nav_screen.dart';
-import 'package:pocketbase/pocketbase.dart';
+import '../providers/auth_provider.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -15,7 +17,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final pb = PocketBase('http://127.0.0.1:8090');
+  bool _isLoading = false;
 
   @override
   void dispose() {
@@ -24,20 +26,28 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  void _login() async {
+  Future<void> _login() async {
     if (_formKey.currentState!.validate()) {
+      setState(() {
+        _isLoading = true;
+      });
+
       try {
-        await pb.collection('users').authWithPassword(
-          _emailController.text,
-          _passwordController.text,
-        );
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const MainNavScreen()),
-        );
+        final authProvider = Provider.of<AuthProvider>(context, listen: false);
+        await authProvider.login(_emailController.text.trim(), _passwordController.text.trim());
+        if (mounted) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (context) => const MainNavScreen()),
+          );
+        }
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Login gagal: $e')),
+          SnackBar(content: Text(e.toString())),
         );
+      } finally {
+        setState(() {
+          _isLoading = false;
+        });
       }
     }
   }
@@ -68,24 +78,26 @@ class _LoginScreenState extends State<LoginScreen> {
                   _buildTextField(
                     controller: _emailController,
                     hint: 'Email',
-                    validator: (value) => !value!.contains('@') ? 'Email tidak valid' : null,
+                    validator: (value) => !value!.trim().contains('@') ? 'Email tidak valid' : null,
                   ),
                   const SizedBox(height: 16),
                   _buildTextField(
                     controller: _passwordController,
                     hint: 'Password',
                     obscure: true,
-                    validator: (value) => value!.length < 6 ? 'Password minimal 6 karakter' : null,
+                    validator: (value) => value!.trim().length < 6 ? 'Password minimal 6 karakter' : null,
                   ),
                   const SizedBox(height: 24),
                   ElevatedButton(
-                    onPressed: _login,
+                    onPressed: _isLoading ? null : _login,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
                       padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     ),
-                    child: const Text('Masuk', style: TextStyle(color: Colors.white)),
+                    child: _isLoading
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : const Text('Masuk', style: TextStyle(color: Colors.white)),
                   ),
                   TextButton(
                     onPressed: () => Navigator.pushReplacement(

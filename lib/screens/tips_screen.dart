@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
 import '../constants/colors.dart';
+import '../providers/auth_provider.dart';
 
 class TipsScreen extends StatefulWidget {
   const TipsScreen({super.key});
@@ -43,14 +44,15 @@ class _TipsScreenState extends State<TipsScreen> {
   }
 
   Future<void> _loadSkinType() async {
-    final prefs = await SharedPreferences.getInstance();
-    final savedSkinType = prefs.getString('skinType');
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    await authProvider.initialize();
+
     if (mounted) {
-      if (savedSkinType == null) {
+      if (authProvider.currentUser == null || authProvider.currentUser!.skinType == 'Belum dianalisis') {
         Navigator.pushReplacementNamed(context, '/quiz');
       } else {
         setState(() {
-          skinType = savedSkinType;
+          skinType = authProvider.currentUser!.skinType;
           isLoading = false;
         });
       }
@@ -58,10 +60,21 @@ class _TipsScreenState extends State<TipsScreen> {
   }
 
   Future<void> _resetSkinType() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('skinType');
-    if (context.mounted) {
-      Navigator.pushReplacementNamed(context, '/quiz');
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    if (authProvider.currentUser != null) {
+      try {
+        final updatedUser = authProvider.currentUser!.copyWith(skinType: 'Belum dianalisis');
+        await authProvider.updateProfile(updatedUser);
+        if (context.mounted) {
+          Navigator.pushReplacementNamed(context, '/quiz');
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error resetting skin type: $e')),
+          );
+        }
+      }
     }
   }
 
@@ -87,7 +100,7 @@ class _TipsScreenState extends State<TipsScreen> {
             onPressed: () {
               Navigator.pushReplacementNamed(context, '/profile');
             },
-          )
+          ),
         ],
       ),
       body: RefreshIndicator(
@@ -107,7 +120,7 @@ class _TipsScreenState extends State<TipsScreen> {
               ...tips.map(
                 (tip) => ListTile(
                   leading: const Icon(Icons.check_circle, color: AppColors.accent),
-                  title: Text(tip),
+                    title: Text(tip),
                   contentPadding: EdgeInsets.zero,
                   visualDensity: const VisualDensity(vertical: -3),
                 ),

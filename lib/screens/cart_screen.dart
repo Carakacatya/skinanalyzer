@@ -17,10 +17,101 @@ class CartScreen extends StatelessWidget {
     Navigator.pushNamed(context, '/checkout', arguments: selectedItems);
   }
 
+  Widget _buildProductImage(Map<String, dynamic> item) {
+    // Check if the product has image_url (new structure from PocketBase)
+    if (item.containsKey('image_url') && item['image_url'] != null && item['image_url'].toString().isNotEmpty) {
+      print('Loading network image from: ${item['image_url']}');
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.network(
+          item['image_url'],
+          width: 60,
+          height: 60,
+          fit: BoxFit.cover,
+          loadingBuilder: (context, child, loadingProgress) {
+            if (loadingProgress == null) return child;
+            return Container(
+              width: 60,
+              height: 60,
+              color: Colors.grey[200],
+              child: Center(
+                child: CircularProgressIndicator(
+                  value: loadingProgress.expectedTotalBytes != null
+                      ? loadingProgress.cumulativeBytesLoaded /
+                          loadingProgress.expectedTotalBytes!
+                      : null,
+                ),
+              ),
+            );
+          },
+          errorBuilder: (context, error, stackTrace) {
+            print('Error loading cart image: $error');
+            return Container(
+              width: 60,
+              height: 60,
+              color: Colors.grey[200],
+              child: const Icon(
+                Icons.broken_image,
+                size: 30,
+                color: Colors.grey,
+              ),
+            );
+          },
+        ),
+      );
+    } 
+    // Fallback to the old structure with local assets
+    else if (item.containsKey('image') && item['image'] != null) {
+      print('Loading asset image from: ${item['image']}');
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.asset(
+          item['image'],
+          width: 60,
+          height: 60,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            print('Error loading asset image: $error');
+            return Container(
+              width: 60,
+              height: 60,
+              color: Colors.grey[200],
+              child: const Icon(
+                Icons.broken_image,
+                size: 30,
+                color: Colors.grey,
+              ),
+            );
+          },
+        ),
+      );
+    } 
+    // If no image is available
+    else {
+      print('No image found for product: ${item['name']}');
+      return Container(
+        width: 60,
+        height: 60,
+        color: Colors.grey[200],
+        child: const Icon(
+          Icons.image_not_supported,
+          size: 30,
+          color: Colors.grey,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final cartProvider = Provider.of<CartProvider>(context);
     final cart = cartProvider.items;
+
+    // Debug: Print cart items
+    print('Cart items count: ${cart.length}');
+    for (var item in cart) {
+      print('Cart item: ${item['name']}, Image: ${item['image_url'] ?? item['image'] ?? 'No image'}');
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -60,16 +151,7 @@ class CartScreen extends StatelessWidget {
                                     cartProvider.toggleSelection(index);
                                   },
                                 ),
-                                if (item['image'] != null)
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: Image.asset(
-                                      item['image'],
-                                      width: 60,
-                                      height: 60,
-                                      fit: BoxFit.cover,
-                                    ),
-                                  ),
+                                _buildProductImage(item),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Column(

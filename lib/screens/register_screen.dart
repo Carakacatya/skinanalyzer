@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../constants/colors.dart';
+import '../providers/auth_provider.dart';
 import 'login_screen.dart';
-import 'main_nav_screen.dart';
-import 'package:pocketbase/pocketbase.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -13,36 +13,45 @@ class RegisterScreen extends StatefulWidget {
 
 class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
+  final _usernameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final pb = PocketBase('http://127.0.0.1:8090');
+  bool _isLoading = false;
 
   @override
   void dispose() {
-    _nameController.dispose();
+    _usernameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
 
-  void _register() async {
+  Future<void> _register() async {
     if (_formKey.currentState!.validate()) {
+      setState(() {
+        _isLoading = true;
+      });
+
       try {
-        final body = {
-          'name': _nameController.text,
-          'email': _emailController.text,
-          'password': _passwordController.text,
-          'passwordConfirm': _passwordController.text,
-        };
-        await pb.collection('users').create(body: body);
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const MainNavScreen()),
+        final authProvider = Provider.of<AuthProvider>(context, listen: false);
+        await authProvider.register(
+          _usernameController.text,
+          _emailController.text,
+          _passwordController.text,
         );
+        if (mounted) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (context) => const LoginScreen()),
+          );
+        }
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Registrasi gagal: $e')),
+          SnackBar(content: Text(e.toString())),
         );
+      } finally {
+        setState(() {
+          _isLoading = false;
+        });
       }
     }
   }
@@ -59,10 +68,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
               key: _formKey,
               child: Column(
                 children: [
-                  Image.asset('assets/images/login_illustration.png', height: 150),
+                  Image.asset('assets/images/register_illustration.png', height: 150),
                   const SizedBox(height: 32),
                   const Text(
-                    'Buat Akun Baru',
+                    'Daftar Akun Baru',
                     style: TextStyle(
                       fontSize: 26,
                       fontWeight: FontWeight.w700,
@@ -71,9 +80,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ),
                   const SizedBox(height: 24),
                   _buildTextField(
-                    controller: _nameController,
-                    hint: 'Nama Lengkap',
-                    validator: (value) => value!.isEmpty ? 'Masukkan nama' : null,
+                    controller: _usernameController,
+                    hint: 'Nama Pengguna',
+                    validator: (value) => value!.isEmpty ? 'Nama pengguna tidak boleh kosong' : null,
                   ),
                   const SizedBox(height: 16),
                   _buildTextField(
@@ -90,20 +99,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ),
                   const SizedBox(height: 24),
                   ElevatedButton(
-                    onPressed: _register,
+                    onPressed: _isLoading ? null : _register,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
                       padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     ),
-                    child: const Text('Daftar', style: TextStyle(color: Colors.white)),
+                    child: _isLoading
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : const Text('Daftar', style: TextStyle(color: Colors.white)),
                   ),
                   TextButton(
                     onPressed: () => Navigator.pushReplacement(
                       context,
                       MaterialPageRoute(builder: (_) => const LoginScreen()),
                     ),
-                    child: const Text('Sudah punya akun? Login'),
+                    child: const Text('Sudah punya akun? Masuk'),
                   ),
                 ],
               ),

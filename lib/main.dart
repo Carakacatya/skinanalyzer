@@ -26,10 +26,14 @@ import 'providers/cart_provider.dart';
 import 'constants/colors.dart';
 
 void main() {
+  // Ensure Flutter is initialized
+  WidgetsFlutterBinding.ensureInitialized();
+  
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => AuthProvider()),
+        // Initialize AuthProvider and call initialize() to check login status
+        ChangeNotifierProvider(create: (_) => AuthProvider()..initialize()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => CartProvider()),
       ],
@@ -63,7 +67,6 @@ class SkinAnalyzerApp extends StatelessWidget {
       initialRoute: '/', // default ke login screen
       routes: {
         '/': (context) => const LoginScreen(),
-        '/login': (context) => const LoginScreen(), // ✅ ditambahkan
         '/register': (context) => const RegisterScreen(),
         '/quiz': (context) => const QuizScreen(),
         '/tips': (context) => const TipsScreen(),
@@ -73,7 +76,7 @@ class SkinAnalyzerApp extends StatelessWidget {
         '/payment_success': (context) => const PaymentSuccessScreen(),
         '/articles': (context) => const ArticleScreen(),
         '/cart': (context) => const CartScreen(),
-        '/login': (context) => const LoginScreen()
+        '/login': (context) => const LoginScreen() // Kept as in original code
       },
       onGenerateRoute: (settings) {
         switch (settings.name) {
