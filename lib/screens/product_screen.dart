@@ -16,6 +16,7 @@ class ProductScreen extends StatefulWidget {
 
 class _ProductScreenState extends State<ProductScreen> {
   String? skinType;
+  String? skinTypeId;
   List<Map<String, dynamic>> products = [];
   bool _isLoading = true;
   String? _errorMessage;
@@ -37,7 +38,78 @@ class _ProductScreenState extends State<ProductScreen> {
     });
     
     if (skinType != null) {
+      await _fetchSkinTypeId();
       await _fetchProducts();
+    } else {
+      print('No skin type found in SharedPreferences');
+      setState(() {
+        _errorMessage = 'Jenis kulit tidak ditemukan. Silakan lakukan kuis terlebih dahulu.';
+        _isLoading = false;
+      });
+    }
+  }
+  
+  // Fungsi untuk mendapatkan ID skin type dari PocketBase
+  Future<void> _fetchSkinTypeId() async {
+    try {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final pb = authProvider.pb;
+      
+      print('Fetching skin type ID for: $skinType');
+      
+      // Cari skin type berdasarkan nama
+      final resultList = await pb.collection('skin_types').getList(
+        filter: 'nama = "$skinType"',
+        page: 1,
+        perPage: 1,
+      );
+      
+      if (resultList.items.isEmpty) {
+        print('Skin type not found, trying case-insensitive search');
+        // Coba pencarian case-insensitive jika tidak ditemukan
+        final resultListCaseInsensitive = await pb.collection('skin_types').getList(
+          filter: 'nama ~ "$skinType"',
+          page: 1,
+          perPage: 1,
+        );
+        
+        if (resultListCaseInsensitive.items.isEmpty) {
+          print('Skin type still not found');
+          return;
+        }
+        
+        setState(() {
+          skinTypeId = resultListCaseInsensitive.items[0].id;
+        });
+        print('Found skin type ID: $skinTypeId');
+      } else {
+        setState(() {
+          skinTypeId = resultList.items[0].id;
+        });
+        print('Found skin type ID: $skinTypeId');
+      }
+    } catch (e) {
+      print('Error fetching skin type ID: $e');
+    }
+  }
+
+  // Konversi nama skin type ke format yang sesuai dengan PocketBase
+  List<String> _getSkinTypeKeywords(String skinType) {
+    // Konversi ke lowercase dan hapus spasi
+    final normalized = skinType.toLowerCase().trim();
+    
+    // Map nama skin type ke nilai yang mungkin disimpan di PocketBase
+    switch (normalized) {
+      case 'kering':
+        return ['kering', 'dry'];
+      case 'berminyak':
+        return ['berminyak', 'oily'];
+      case 'sensitif':
+        return ['sensitif', 'sensitive'];
+      case 'kombinasi':
+        return ['kombinasi', 'combination'];
+      default:
+        return [normalized];
     }
   }
 
@@ -63,95 +135,120 @@ class _ProductScreenState extends State<ProductScreen> {
         return;
       }
       
-      print('Fetching all products');
+      if (skinType == null) {
+        setState(() {
+          _errorMessage = 'Jenis kulit tidak ditemukan. Silakan lakukan kuis terlebih dahulu.';
+          _isLoading = false;
+        });
+        return;
+      }
       
-      // Fetch all products without filtering first
-      final resultList = await pb.collection('products').getList(
+      print('Fetching products for skin type: $skinType');
+      
+      // Dapatkan semua produk terlebih dahulu
+      final allProducts = await pb.collection('products').getList(
         page: 1,
-        perPage: 50,
+        perPage: 100,
       );
       
-      print('Total products found: ${resultList.items.length}');
+      print('Total products found: ${allProducts.items.length}');
       
-      // Print all products for debugging
-      for (var item in resultList.items) {
-        print('Product: ${item.id} - ${item.data['name']} - Skin Type: ${item.data['skin_type']}');
+      // Debug: Print semua produk dan skin type mereka
+      for (var item in allProducts.items) {
+        print('Product: ${item.id} - ${item.data['name']} - Skin Types: ${item.data['skin_type']}');
       }
       
-      // If no skin_type field exists in products, we'll use a different approach
-      // Let's check if any product has a skin_type field
-      bool hasSkinTypeField = false;
-      for (var item in resultList.items) {
-        if (item.data.containsKey('skin_type')) {
-          hasSkinTypeField = true;
-          break;
-        }
-      }
+      // Dapatkan keywords untuk skin type
+      final skinTypeKeywords = _getSkinTypeKeywords(skinType!);
+      print('Skin type keywords: $skinTypeKeywords');
       
-      List<RecordModel> filteredRecords = [];
+      // Filter produk secara manual
+      final filteredProducts = <Map<String, dynamic>>[];
       
-      if (hasSkinTypeField) {
-        print('Products have skin_type field, filtering by skin type: $skinType');
-        // Filter by skin_type if the field exists
-        filteredRecords = resultList.items.where((record) {
-          final productSkinType = record.data['skin_type']?.toString().toLowerCase() ?? '';
-          final userSkinType = skinType?.toLowerCase() ?? '';
+      for (var record in allProducts.items) {
+        bool matchFound = false;
+        
+        // Cek apakah skin_type adalah array
+        if (record.data['skin_type'] is List) {
+          final productSkinTypes = List<String>.from(record.data['skin_type']);
           
-          return productSkinType.contains(userSkinType) || 
-                 userSkinType.contains(productSkinType);
-        }).toList();
-      } else {
-        print('Products do not have skin_type field, using alternative filtering');
-        // Alternative filtering based on product name and description
-        filteredRecords = resultList.items.where((record) {
+          // Cek apakah ada keyword yang cocok dengan salah satu skin type produk
+          for (var keyword in skinTypeKeywords) {
+            for (var productType in productSkinTypes) {
+              if (productType.toLowerCase().contains(keyword.toLowerCase())) {
+                matchFound = true;
+                break;
+              }
+            }
+            if (matchFound) break;
+          }
+        } 
+        // Cek apakah skin_type adalah string
+        else if (record.data['skin_type'] is String) {
+          final productSkinType = record.data['skin_type'].toString().toLowerCase();
+          
+          // Cek apakah ada keyword yang cocok dengan skin type produk
+          for (var keyword in skinTypeKeywords) {
+            if (productSkinType.contains(keyword.toLowerCase())) {
+              matchFound = true;
+              break;
+            }
+          }
+        }
+        
+        // Jika tidak ada skin_type, cek nama dan deskripsi
+        if (!matchFound && record.data.containsKey('name') && record.data.containsKey('description')) {
           final name = record.data['name']?.toString().toLowerCase() ?? '';
           final description = record.data['description']?.toString().toLowerCase() ?? '';
-          final userSkinType = skinType?.toLowerCase() ?? '';
           
-          // Map skin types to keywords
-          Map<String, List<String>> skinTypeKeywords = {
+          // Map skin types to keywords for checking in name/description
+          Map<String, List<String>> skinTypeContentKeywords = {
             'kering': ['kering', 'dry', 'moisturizer', 'hydrating', 'soy'],
             'berminyak': ['berminyak', 'oily', 'acne', 'matte', 'oil-free'],
             'sensitif': ['sensitif', 'sensitive', 'gentle', 'calm', 'soothe'],
             'kombinasi': ['kombinasi', 'combination', 'balance', 'dual']
           };
           
-          // Get keywords for the user's skin type
-          List<String> keywords = skinTypeKeywords[userSkinType] ?? [];
+          // Get extended keywords for the user's skin type
+          List<String> contentKeywords = skinTypeContentKeywords[skinType!.toLowerCase()] ?? [];
           
           // Check if product name or description contains any of the keywords
-          for (var keyword in keywords) {
+          for (var keyword in contentKeywords) {
             if (name.contains(keyword) || description.contains(keyword)) {
-              return true;
+              matchFound = true;
+              break;
             }
           }
-          
-          return false;
-        }).toList();
+        }
+        
+        // Jika cocok, tambahkan ke hasil
+        if (matchFound) {
+          filteredProducts.add({
+            'id': record.id,
+            'name': record.data['name'] ?? '',
+            'price': record.data['price'] ?? 0,
+            'description': record.data['description'] ?? '',
+            'image_url': record.data['image_url'] ?? '',
+            'rating': record.data['rating'] ?? 0,
+            'skin_type': record.data['skin_type'] ?? [],
+          });
+        }
       }
       
-      print('Filtered products count: ${filteredRecords.length}');
+      print('Filtered products count: ${filteredProducts.length}');
       
-      // If no products match the filter, show all products
-      if (filteredRecords.isEmpty) {
-        print('No products match the filter, showing all products');
-        filteredRecords = resultList.items;
+      // Jika tidak ada produk yang cocok, tampilkan pesan
+      if (filteredProducts.isEmpty) {
+        print('No matching products found for skin type: $skinType');
+        setState(() {
+          products = [];
+          _isLoading = false;
+        });
+        return;
       }
-      
-      final fetchedProducts = filteredRecords.map((record) {
-        return {
-          'id': record.id,
-          'name': record.data['name'] ?? '',
-          'price': record.data['price'] ?? 0,
-          'description': record.data['description'] ?? '',
-          'image_url': record.data['image_url'] ?? '',
-          'rating': record.data['rating'] ?? 0,
-          'skin_type': record.data['skin_type'] ?? '',
-        };
-      }).toList();
       
       setState(() {
-        products = fetchedProducts;
+        products = filteredProducts;
         _isLoading = false;
       });
     } catch (e) {
@@ -233,7 +330,7 @@ class _ProductScreenState extends State<ProductScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Rekomendasi Produk'),
+        title: const Text('Produk untuk Jenis Kulitmu'),
         backgroundColor: AppColors.primary,
         centerTitle: true,
         actions: [
@@ -248,7 +345,46 @@ class _ProductScreenState extends State<ProductScreen> {
         ],
       ),
       body: skinType == null
-          ? const Center(child: CircularProgressIndicator())
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(
+                    Icons.help_outline,
+                    size: 64,
+                    color: Colors.grey,
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Jenis kulit belum ditentukan',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Silakan lakukan kuis untuk menentukan jenis kulit Anda',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton(
+                    onPressed: () {
+                      Navigator.pushReplacementNamed(context, '/quiz');
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                    ),
+                    child: const Text('Mulai Kuis'),
+                  ),
+                ],
+              ),
+            )
           : _isLoading
               ? const Center(child: CircularProgressIndicator())
               : _errorMessage != null
@@ -264,7 +400,6 @@ class _ProductScreenState extends State<ProductScreen> {
                           const SizedBox(height: 16),
                           ElevatedButton(
                             onPressed: () {
-                              final authProvider = Provider.of<AuthProvider>(context, listen: false);
                               Navigator.pushReplacementNamed(context, '/login');
                             },
                             child: const Text('Login Kembali'),
@@ -280,27 +415,70 @@ class _ProductScreenState extends State<ProductScreen> {
                   : SafeArea(
                       child: Column(
                         children: [
-                          Padding(
+                          Container(
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                'Jenis Kulit: $skinType',
-                                style: const TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.primary,
+                            color: Colors.grey.shade50,
+                            child: Row(
+                              children: [
+                                const Icon(Icons.check_circle, color: AppColors.primary),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Produk yang cocok untuk jenis kulit $skinType',
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.primary,
+                                    ),
+                                  ),
                                 ),
-                              ),
+                                Text(
+                                  '${products.length} produk',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: Colors.grey.shade700,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                           Expanded(
                             child: products.isEmpty
-                                ? const Center(
-                                    child: Text('Tidak ada produk untuk jenis kulit ini'),
+                                ? Center(
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        const Icon(
+                                          Icons.search_off,
+                                          size: 64,
+                                          color: Colors.grey,
+                                        ),
+                                        const SizedBox(height: 16),
+                                        Text(
+                                          'Tidak ada produk untuk jenis kulit $skinType',
+                                          style: const TextStyle(
+                                            fontSize: 16,
+                                            color: Colors.grey,
+                                          ),
+                                          textAlign: TextAlign.center,
+                                        ),
+                                        const SizedBox(height: 24),
+                                        ElevatedButton(
+                                          onPressed: () async {
+                                            final prefs = await SharedPreferences.getInstance();
+                                            await prefs.remove('skinType');
+                                            Navigator.pushReplacementNamed(context, '/quiz');
+                                          },
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: AppColors.primary,
+                                          ),
+                                          child: const Text('Ulangi Kuis'),
+                                        ),
+                                      ],
+                                    ),
                                   )
                                 : GridView.builder(
-                                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                                    padding: const EdgeInsets.all(16),
                                     itemCount: products.length,
                                     gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                                       crossAxisCount: 2,
@@ -336,9 +514,32 @@ class _ProductScreenState extends State<ProductScreen> {
                                           child: Column(
                                             crossAxisAlignment: CrossAxisAlignment.start,
                                             children: [
-                                              ClipRRect(
-                                                borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-                                                child: _buildProductImage(product['image_url']),
+                                              Stack(
+                                                children: [
+                                                  ClipRRect(
+                                                    borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                                                    child: _buildProductImage(product['image_url']),
+                                                  ),
+                                                  Positioned(
+                                                    top: 8,
+                                                    right: 8,
+                                                    child: Container(
+                                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                      decoration: BoxDecoration(
+                                                        color: AppColors.primary,
+                                                        borderRadius: BorderRadius.circular(12),
+                                                      ),
+                                                      child: const Text(
+                                                        'Rekomendasi',
+                                                        style: TextStyle(
+                                                          color: Colors.white,
+                                                          fontSize: 10,
+                                                          fontWeight: FontWeight.bold,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
                                               Padding(
                                                 padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
@@ -388,9 +589,8 @@ class _ProductScreenState extends State<ProductScreen> {
                                     },
                                   ),
                           ),
-                          const SizedBox(height: 12),
                           Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            padding: const EdgeInsets.all(16),
                             child: Column(
                               children: [
                                 SizedBox(
@@ -430,7 +630,6 @@ class _ProductScreenState extends State<ProductScreen> {
                                     ),
                                   ),
                                 ),
-                                const SizedBox(height: 16),
                               ],
                             ),
                           ),
