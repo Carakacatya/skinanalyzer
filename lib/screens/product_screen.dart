@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:pocketbase/pocketbase.dart';
-
+import 'package:google_fonts/google_fonts.dart';
 import '../constants/colors.dart';
-import '../providers/cart_provider.dart';
 import '../providers/auth_provider.dart';
+import '../providers/cart_provider.dart';
 
 class ProductScreen extends StatefulWidget {
   const ProductScreen({super.key});
@@ -15,627 +13,529 @@ class ProductScreen extends StatefulWidget {
 }
 
 class _ProductScreenState extends State<ProductScreen> {
-  String? skinType;
-  String? skinTypeId;
-  List<Map<String, dynamic>> products = [];
+  List<Map<String, dynamic>> _products = [];
+  List<String> _categories = ['All Products'];
+  String _selectedCategory = 'All Products';
   bool _isLoading = true;
-  String? _errorMessage;
+  String? _error;
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
-    _loadSkinType();
+    _loadProducts();
   }
 
-  Future<void> _loadSkinType() async {
-    final prefs = await SharedPreferences.getInstance();
-    final type = prefs.getString('skinType');
-    
-    print('Loaded skin type from SharedPreferences: $type');
-    
-    setState(() {
-      skinType = type;
-    });
-    
-    if (skinType != null) {
-      await _fetchSkinTypeId();
-      await _fetchProducts();
-    } else {
-      print('No skin type found in SharedPreferences');
-      setState(() {
-        _errorMessage = 'Jenis kulit tidak ditemukan. Silakan lakukan kuis terlebih dahulu.';
-        _isLoading = false;
-      });
-    }
-  }
-  
-  // Fungsi untuk mendapatkan ID skin type dari PocketBase
-  Future<void> _fetchSkinTypeId() async {
-    try {
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      final pb = authProvider.pb;
-      
-      print('Fetching skin type ID for: $skinType');
-      
-      // Cari skin type berdasarkan nama
-      final resultList = await pb.collection('skin_types').getList(
-        filter: 'nama = "$skinType"',
-        page: 1,
-        perPage: 1,
-      );
-      
-      if (resultList.items.isEmpty) {
-        print('Skin type not found, trying case-insensitive search');
-        // Coba pencarian case-insensitive jika tidak ditemukan
-        final resultListCaseInsensitive = await pb.collection('skin_types').getList(
-          filter: 'nama ~ "$skinType"',
-          page: 1,
-          perPage: 1,
-        );
-        
-        if (resultListCaseInsensitive.items.isEmpty) {
-          print('Skin type still not found');
-          return;
-        }
-        
-        setState(() {
-          skinTypeId = resultListCaseInsensitive.items[0].id;
-        });
-        print('Found skin type ID: $skinTypeId');
-      } else {
-        setState(() {
-          skinTypeId = resultList.items[0].id;
-        });
-        print('Found skin type ID: $skinTypeId');
-      }
-    } catch (e) {
-      print('Error fetching skin type ID: $e');
-    }
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
-  // Konversi nama skin type ke format yang sesuai dengan PocketBase
-  List<String> _getSkinTypeKeywords(String skinType) {
-    // Konversi ke lowercase dan hapus spasi
-    final normalized = skinType.toLowerCase().trim();
-    
-    // Map nama skin type ke nilai yang mungkin disimpan di PocketBase
-    switch (normalized) {
-      case 'kering':
-        return ['kering', 'dry'];
-      case 'berminyak':
-        return ['berminyak', 'oily'];
-      case 'sensitif':
-        return ['sensitif', 'sensitive'];
-      case 'kombinasi':
-        return ['kombinasi', 'combination'];
-      default:
-        return [normalized];
-    }
-  }
-
-  Future<void> _fetchProducts() async {
+  Future<void> _loadProducts() async {
     setState(() {
       _isLoading = true;
-      _errorMessage = null;
+      _error = null;
     });
 
     try {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      final pb = authProvider.pb;
       
-      // Check if user is authenticated
-      final isAuthenticated = await authProvider.isAuthenticated();
-      print('User is authenticated: $isAuthenticated');
-      
-      if (!isAuthenticated) {
-        setState(() {
-          _errorMessage = 'User ID not found. Please log in again.';
-          _isLoading = false;
-        });
-        return;
+      if (authProvider.pb == null) {
+        throw Exception('PocketBase not initialized');
       }
+
+      debugPrint('=== LOADING PRODUCTS ===');
       
-      if (skinType == null) {
-        setState(() {
-          _errorMessage = 'Jenis kulit tidak ditemukan. Silakan lakukan kuis terlebih dahulu.';
-          _isLoading = false;
-        });
-        return;
-      }
-      
-      print('Fetching products for skin type: $skinType');
-      
-      // Dapatkan semua produk terlebih dahulu
-      final allProducts = await pb.collection('products').getList(
-        page: 1,
-        perPage: 100,
+      // Load products from PocketBase
+      final records = await authProvider.pb.collection('products').getFullList(
+        sort: '-created',
       );
-      
-      print('Total products found: ${allProducts.items.length}');
-      
-      // Debug: Print semua produk dan skin type mereka
-      for (var item in allProducts.items) {
-        print('Product: ${item.id} - ${item.data['name']} - Skin Types: ${item.data['skin_type']}');
-      }
-      
-      // Dapatkan keywords untuk skin type
-      final skinTypeKeywords = _getSkinTypeKeywords(skinType!);
-      print('Skin type keywords: $skinTypeKeywords');
-      
-      // Filter produk secara manual
-      final filteredProducts = <Map<String, dynamic>>[];
-      
-      for (var record in allProducts.items) {
-        bool matchFound = false;
+
+      debugPrint('Found ${records.length} products');
+
+      List<Map<String, dynamic>> products = [];
+      Set<String> categories = {'All Products'};
+
+      for (var record in records) {
+        final product = {
+          'id': record.id,
+          'name': record.data['name'] ?? 'Unknown Product',
+          'price': _parsePrice(record.data['price']),
+          'image_url': record.data['image_url'] ?? '',
+          'description': record.data['description'] ?? '',
+          'category': record.data['category'] ?? 'Uncategorized',
+        };
+
+        products.add(product);
+        categories.add(product['category']);
         
-        // Cek apakah skin_type adalah array
-        if (record.data['skin_type'] is List) {
-          final productSkinTypes = List<String>.from(record.data['skin_type']);
-          
-          // Cek apakah ada keyword yang cocok dengan salah satu skin type produk
-          for (var keyword in skinTypeKeywords) {
-            for (var productType in productSkinTypes) {
-              if (productType.toLowerCase().contains(keyword.toLowerCase())) {
-                matchFound = true;
-                break;
-              }
-            }
-            if (matchFound) break;
-          }
-        } 
-        // Cek apakah skin_type adalah string
-        else if (record.data['skin_type'] is String) {
-          final productSkinType = record.data['skin_type'].toString().toLowerCase();
-          
-          // Cek apakah ada keyword yang cocok dengan skin type produk
-          for (var keyword in skinTypeKeywords) {
-            if (productSkinType.contains(keyword.toLowerCase())) {
-              matchFound = true;
-              break;
-            }
-          }
-        }
-        
-        // Jika tidak ada skin_type, cek nama dan deskripsi
-        if (!matchFound && record.data.containsKey('name') && record.data.containsKey('description')) {
-          final name = record.data['name']?.toString().toLowerCase() ?? '';
-          final description = record.data['description']?.toString().toLowerCase() ?? '';
-          
-          // Map skin types to keywords for checking in name/description
-          Map<String, List<String>> skinTypeContentKeywords = {
-            'kering': ['kering', 'dry', 'moisturizer', 'hydrating', 'soy'],
-            'berminyak': ['berminyak', 'oily', 'acne', 'matte', 'oil-free'],
-            'sensitif': ['sensitif', 'sensitive', 'gentle', 'calm', 'soothe'],
-            'kombinasi': ['kombinasi', 'combination', 'balance', 'dual']
-          };
-          
-          // Get extended keywords for the user's skin type
-          List<String> contentKeywords = skinTypeContentKeywords[skinType!.toLowerCase()] ?? [];
-          
-          // Check if product name or description contains any of the keywords
-          for (var keyword in contentKeywords) {
-            if (name.contains(keyword) || description.contains(keyword)) {
-              matchFound = true;
-              break;
-            }
-          }
-        }
-        
-        // Jika cocok, tambahkan ke hasil
-        if (matchFound) {
-          filteredProducts.add({
-            'id': record.id,
-            'name': record.data['name'] ?? '',
-            'price': record.data['price'] ?? 0,
-            'description': record.data['description'] ?? '',
-            'image_url': record.data['image_url'] ?? '',
-            'rating': record.data['rating'] ?? 0,
-            'skin_type': record.data['skin_type'] ?? [],
-          });
-        }
+        debugPrint('Product: ${product['name']} - Rp${product['price']}');
       }
-      
-      print('Filtered products count: ${filteredProducts.length}');
-      
-      // Jika tidak ada produk yang cocok, tampilkan pesan
-      if (filteredProducts.isEmpty) {
-        print('No matching products found for skin type: $skinType');
-        setState(() {
-          products = [];
-          _isLoading = false;
-        });
-        return;
-      }
-      
+
       setState(() {
-        products = filteredProducts;
+        _products = products;
+        _categories = categories.toList();
         _isLoading = false;
       });
+
+      debugPrint('Products loaded successfully: ${_products.length} items');
+      debugPrint('Categories: $_categories');
+
     } catch (e) {
-      print('Error fetching products: ${e.toString()}');
+      debugPrint('Error loading products: $e');
       setState(() {
-        _errorMessage = 'Gagal memuat produk: ${e.toString()}';
+        _error = e.toString();
         _isLoading = false;
       });
     }
   }
 
-  void _addToCart(Map<String, dynamic> product, BuildContext context) {
-    Provider.of<CartProvider>(context, listen: false).addToCart(product);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('${product['name']} ditambahkan ke keranjang!'),
-        backgroundColor: AppColors.primary,
-      ),
-    );
+  double _parsePrice(dynamic price) {
+    if (price == null) return 0.0;
+    if (price is num) return price.toDouble();
+    if (price is String) return double.tryParse(price) ?? 0.0;
+    return 0.0;
   }
 
-  void _goToCart() {
-    Navigator.pushNamed(context, '/cart');
+  String _formatPrice(double price) {
+    return price.toStringAsFixed(0);
   }
 
-  Widget _buildProductImage(String? imageUrl) {
-    if (imageUrl == null || imageUrl.isEmpty) {
+  List<Map<String, dynamic>> get _filteredProducts {
+    List<Map<String, dynamic>> filtered = _products;
+
+    // Filter by category
+    if (_selectedCategory != 'All Products') {
+      filtered = filtered.where((product) => 
+        product['category'] == _selectedCategory).toList();
+    }
+
+    // Filter by search query
+    if (_searchQuery.isNotEmpty) {
+      filtered = filtered.where((product) =>
+        product['name'].toLowerCase().contains(_searchQuery.toLowerCase()) ||
+        product['description'].toLowerCase().contains(_searchQuery.toLowerCase())
+      ).toList();
+    }
+
+    return filtered;
+  }
+
+  Widget _buildProductImage(Map<String, dynamic> product) {
+    final imageUrl = product['image_url']?.toString() ?? '';
+    
+    if (imageUrl.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Image.network(
+          imageUrl,
+          width: double.infinity,
+          height: 120,
+          fit: BoxFit.cover,
+          loadingBuilder: (context, child, loadingProgress) {
+            if (loadingProgress == null) return child;
+            return Container(
+              width: double.infinity,
+              height: 120,
+              color: Colors.grey[200],
+              child: const Center(
+                child: CircularProgressIndicator(
+                  color: AppColors.primary,
+                  strokeWidth: 2,
+                ),
+              ),
+            );
+          },
+          errorBuilder: (context, error, stackTrace) {
+            return Container(
+              width: double.infinity,
+              height: 120,
+              decoration: BoxDecoration(
+                color: Colors.grey[200],
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(
+                Icons.broken_image,
+                size: 40,
+                color: Colors.grey,
+              ),
+            );
+          },
+        ),
+      );
+    } else {
       return Container(
         width: double.infinity,
-        height: 100,
-        color: Colors.grey[200],
+        height: 120,
+        decoration: BoxDecoration(
+          color: Colors.grey[200],
+          borderRadius: BorderRadius.circular(12),
+        ),
         child: const Icon(
           Icons.image_not_supported,
-          size: 50,
+          size: 40,
           color: Colors.grey,
         ),
       );
     }
+  }
 
-    print('Loading image from URL: $imageUrl');
-    return Image.network(
-      imageUrl,
-      width: double.infinity,
-      height: 100,
-      fit: BoxFit.cover,
-      loadingBuilder: (context, child, loadingProgress) {
-        if (loadingProgress == null) return child;
-        return Container(
-          width: double.infinity,
-          height: 100,
-          color: Colors.grey[200],
-          child: Center(
-            child: CircularProgressIndicator(
-              value: loadingProgress.expectedTotalBytes != null
-                  ? loadingProgress.cumulativeBytesLoaded /
-                      loadingProgress.expectedTotalBytes!
-                  : null,
+  Future<void> _addToCart(Map<String, dynamic> product) async {
+    try {
+      final cartProvider = Provider.of<CartProvider>(context, listen: false);
+      await cartProvider.addToCart(product);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${product['name']} ditambahkan ke keranjang',
+              style: GoogleFonts.poppins(),
             ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
           ),
         );
-      },
-      errorBuilder: (context, error, stackTrace) {
-        print('Error loading image: $error');
-        return Container(
-          width: double.infinity,
-          height: 100,
-          color: Colors.grey[200],
-          child: const Icon(
-            Icons.broken_image,
-            size: 50,
-            color: Colors.grey,
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Gagal menambahkan ke keranjang: $e',
+              style: GoogleFonts.poppins(),
+            ),
+            backgroundColor: Colors.red,
           ),
         );
-      },
-    );
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color.fromARGB(255, 248, 233, 235),
       appBar: AppBar(
-        title: const Text('Produk untuk Jenis Kulitmu'),
+        title: Text(
+          'Skin Analyzer',
+          style: GoogleFonts.poppins(
+            fontWeight: FontWeight.w600,
+            fontSize: 20,
+          ),
+        ),
         backgroundColor: AppColors.primary,
         centerTitle: true,
+        automaticallyImplyLeading: false,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _fetchProducts,
-          ),
-          IconButton(
-            icon: const Icon(Icons.shopping_cart),
-            onPressed: _goToCart,
+          Consumer<CartProvider>(
+            builder: (context, cartProvider, child) {
+              return Stack(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.shopping_cart),
+                    onPressed: () => Navigator.pushNamed(context, '/cart'),
+                  ),
+                  if (cartProvider.items.isNotEmpty)
+                    Positioned(
+                      right: 8,
+                      top: 8,
+                      child: Container(
+                        padding: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        constraints: const BoxConstraints(
+                          minWidth: 16,
+                          minHeight: 16,
+                        ),
+                        child: Text(
+                          '${cartProvider.items.length}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
         ],
       ),
-      body: skinType == null
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.help_outline,
-                    size: 64,
-                    color: Colors.grey,
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Jenis kulit belum ditentukan',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Silakan lakukan kuis untuk menentukan jenis kulit Anda',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.grey,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 24),
-                  ElevatedButton(
-                    onPressed: () {
-                      Navigator.pushReplacementNamed(context, '/quiz');
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                    ),
-                    child: const Text('Mulai Kuis'),
-                  ),
-                ],
+      body: Column(
+        children: [
+          // Search Bar
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Search any Product...',
+                hintStyle: GoogleFonts.poppins(color: Colors.grey[500]),
+                prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() {
+                            _searchQuery = '';
+                          });
+                        },
+                      )
+                    : const Icon(Icons.mic, color: Colors.grey),
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
               ),
-            )
-          : _isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : _errorMessage != null
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            _errorMessage!,
-                            style: const TextStyle(color: Colors.red),
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 16),
-                          ElevatedButton(
-                            onPressed: () {
-                              Navigator.pushReplacementNamed(context, '/login');
-                            },
-                            child: const Text('Login Kembali'),
-                          ),
-                          const SizedBox(height: 8),
-                          ElevatedButton(
-                            onPressed: _fetchProducts,
-                            child: const Text('Coba Lagi'),
-                          ),
-                        ],
+              onChanged: (value) {
+                setState(() {
+                  _searchQuery = value;
+                });
+              },
+            ),
+          ),
+
+          // Category Tabs
+          if (_categories.length > 1)
+            Container(
+              height: 50,
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                itemCount: _categories.length,
+                itemBuilder: (context, index) {
+                  final category = _categories[index];
+                  final isSelected = category == _selectedCategory;
+                  
+                  return GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _selectedCategory = category;
+                      });
+                    },
+                    child: Container(
+                      margin: const EdgeInsets.only(right: 12),
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: isSelected ? AppColors.primary : Colors.white,
+                        borderRadius: BorderRadius.circular(25),
+                        border: Border.all(
+                          color: isSelected ? AppColors.primary : Colors.grey[300]!,
+                        ),
                       ),
-                    )
-                  : SafeArea(
-                      child: Column(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            color: Colors.grey.shade50,
-                            child: Row(
+                      child: Text(
+                        category,
+                        style: GoogleFonts.poppins(
+                          color: isSelected ? Colors.white : Colors.grey[700],
+                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+
+          const SizedBox(height: 16),
+
+          // Products Grid
+          Expanded(
+            child: _isLoading
+                ? const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircularProgressIndicator(color: AppColors.primary),
+                        SizedBox(height: 16),
+                        Text('Loading products...'),
+                      ],
+                    ),
+                  )
+                : _error != null
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(
+                              Icons.error_outline,
+                              size: 64,
+                              color: Colors.red,
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              'Error loading products',
+                              style: GoogleFonts.poppins(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _error!,
+                              style: GoogleFonts.poppins(
+                                fontSize: 14,
+                                color: Colors.grey[600],
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 24),
+                            ElevatedButton(
+                              onPressed: _loadProducts,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.primary,
+                              ),
+                              child: Text(
+                                'Retry',
+                                style: GoogleFonts.poppins(color: Colors.white),
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : _filteredProducts.isEmpty
+                        ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                const Icon(Icons.check_circle, color: AppColors.primary),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    'Produk yang cocok untuk jenis kulit $skinType',
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w600,
-                                      color: AppColors.primary,
-                                    ),
-                                  ),
+                                const Icon(
+                                  Icons.inventory_2_outlined,
+                                  size: 64,
+                                  color: Colors.grey,
                                 ),
+                                const SizedBox(height: 16),
                                 Text(
-                                  '${products.length} produk',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.grey.shade700,
+                                  _searchQuery.isNotEmpty
+                                      ? 'No products found for "$_searchQuery"'
+                                      : 'No products in $_selectedCategory category',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 16,
+                                    color: Colors.grey[600],
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                                const SizedBox(height: 24),
+                                ElevatedButton(
+                                  onPressed: _loadProducts,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppColors.primary,
+                                  ),
+                                  child: Text(
+                                    'Refresh',
+                                    style: GoogleFonts.poppins(color: Colors.white),
                                   ),
                                 ),
                               ],
                             ),
-                          ),
-                          Expanded(
-                            child: products.isEmpty
-                                ? Center(
-                                    child: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        const Icon(
-                                          Icons.search_off,
-                                          size: 64,
-                                          color: Colors.grey,
-                                        ),
-                                        const SizedBox(height: 16),
-                                        Text(
-                                          'Tidak ada produk untuk jenis kulit $skinType',
-                                          style: const TextStyle(
-                                            fontSize: 16,
-                                            color: Colors.grey,
-                                          ),
-                                          textAlign: TextAlign.center,
-                                        ),
-                                        const SizedBox(height: 24),
-                                        ElevatedButton(
-                                          onPressed: () async {
-                                            final prefs = await SharedPreferences.getInstance();
-                                            await prefs.remove('skinType');
-                                            Navigator.pushReplacementNamed(context, '/quiz');
-                                          },
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: AppColors.primary,
-                                          ),
-                                          child: const Text('Ulangi Kuis'),
-                                        ),
-                                      ],
-                                    ),
-                                  )
-                                : GridView.builder(
-                                    padding: const EdgeInsets.all(16),
-                                    itemCount: products.length,
-                                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                                      crossAxisCount: 2,
-                                      mainAxisSpacing: 16,
-                                      crossAxisSpacing: 16,
-                                      childAspectRatio: 0.70,
-                                    ),
-                                    itemBuilder: (context, index) {
-                                      final product = products[index];
-                                      return GestureDetector(
-                                        onTap: () async {
-                                          final addedProduct = await Navigator.pushNamed(
-                                            context,
-                                            '/productDetail',
-                                            arguments: product,
-                                          );
-                                          if (addedProduct != null) {
-                                            _addToCart(addedProduct as Map<String, dynamic>, context);
-                                          }
-                                        },
-                                        child: Container(
-                                          decoration: BoxDecoration(
-                                            color: Colors.white,
-                                            borderRadius: BorderRadius.circular(16),
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: Colors.grey.withOpacity(0.15),
-                                                blurRadius: 10,
-                                                offset: const Offset(0, 4),
-                                              )
-                                            ],
-                                          ),
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Stack(
-                                                children: [
-                                                  ClipRRect(
-                                                    borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-                                                    child: _buildProductImage(product['image_url']),
-                                                  ),
-                                                  Positioned(
-                                                    top: 8,
-                                                    right: 8,
-                                                    child: Container(
-                                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                                      decoration: BoxDecoration(
-                                                        color: AppColors.primary,
-                                                        borderRadius: BorderRadius.circular(12),
-                                                      ),
-                                                      child: const Text(
-                                                        'Rekomendasi',
-                                                        style: TextStyle(
-                                                          color: Colors.white,
-                                                          fontSize: 10,
-                                                          fontWeight: FontWeight.bold,
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                              Padding(
-                                                padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
-                                                child: Column(
-                                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                                  children: [
-                                                    Text(
-                                                      product['name'],
-                                                      style: const TextStyle(
-                                                        fontWeight: FontWeight.w600,
-                                                        fontSize: 14,
-                                                      ),
-                                                      maxLines: 2,
-                                                      overflow: TextOverflow.ellipsis,
-                                                    ),
-                                                    const SizedBox(height: 6),
-                                                    Text(
-                                                      'Rp ${product['price']}',
-                                                      style: const TextStyle(
-                                                        fontWeight: FontWeight.bold,
-                                                        fontSize: 14,
-                                                        color: AppColors.primary,
-                                                      ),
-                                                    ),
-                                                    const SizedBox(height: 6),
-                                                    SizedBox(
-                                                      width: double.infinity,
-                                                      child: ElevatedButton(
-                                                        onPressed: () => _addToCart(product, context),
-                                                        style: ElevatedButton.styleFrom(
-                                                          backgroundColor: AppColors.accent,
-                                                          shape: RoundedRectangleBorder(
-                                                            borderRadius: BorderRadius.circular(12),
-                                                          ),
-                                                          padding: const EdgeInsets.symmetric(vertical: 10),
-                                                        ),
-                                                        child: const Text('Add to Cart'),
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
+                          )
+                        : RefreshIndicator(
+                            onRefresh: _loadProducts,
+                            color: AppColors.primary,
+                            child: GridView.builder(
+                              padding: const EdgeInsets.all(16),
+                              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 2,
+                                childAspectRatio: 0.75,
+                                crossAxisSpacing: 12,
+                                mainAxisSpacing: 12,
+                              ),
+                              itemCount: _filteredProducts.length,
+                              itemBuilder: (context, index) {
+                                final product = _filteredProducts[index];
+                                
+                                return Card(
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  elevation: 4,
+                                  child: InkWell(
+                                    onTap: () {
+                                      Navigator.pushNamed(
+                                        context,
+                                        '/productDetail',
+                                        arguments: product,
                                       );
                                     },
-                                  ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              children: [
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: ElevatedButton.icon(
-                                    onPressed: _goToCart,
-                                    icon: const Icon(Icons.payment),
-                                    label: const Text('Lanjut ke Checkout'),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: AppColors.primary,
-                                      padding: const EdgeInsets.symmetric(vertical: 14),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(16),
+                                    borderRadius: BorderRadius.circular(16),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(12),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Expanded(
+                                            flex: 3,
+                                            child: _buildProductImage(product),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Expanded(
+                                            flex: 2,
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  product['name'],
+                                                  style: GoogleFonts.poppins(
+                                                    fontWeight: FontWeight.w600,
+                                                    fontSize: 14,
+                                                  ),
+                                                  maxLines: 2,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                                const SizedBox(height: 4),
+                                                Text(
+                                                  'Rp ${_formatPrice(product['price'])}',
+                                                  style: GoogleFonts.poppins(
+                                                    color: AppColors.primary,
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 16,
+                                                  ),
+                                                ),
+                                                const Spacer(),
+                                                SizedBox(
+                                                  width: double.infinity,
+                                                  child: ElevatedButton(
+                                                    onPressed: () => _addToCart(product),
+                                                    style: ElevatedButton.styleFrom(
+                                                      backgroundColor: AppColors.primary,
+                                                      padding: const EdgeInsets.symmetric(vertical: 8),
+                                                      shape: RoundedRectangleBorder(
+                                                        borderRadius: BorderRadius.circular(8),
+                                                      ),
+                                                    ),
+                                                    child: Text(
+                                                      'Add to Cart',
+                                                      style: GoogleFonts.poppins(
+                                                        color: Colors.white,
+                                                        fontSize: 12,
+                                                        fontWeight: FontWeight.w500,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ),
                                   ),
-                                ),
-                                const SizedBox(height: 8),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: TextButton(
-                                    onPressed: () async {
-                                      final prefs = await SharedPreferences.getInstance();
-                                      await prefs.remove('skinType');
-                                      Navigator.pushReplacementNamed(context, '/quiz');
-                                    },
-                                    style: TextButton.styleFrom(
-                                      backgroundColor: Colors.grey.shade100,
-                                      padding: const EdgeInsets.symmetric(vertical: 14),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(16),
-                                      ),
-                                    ),
-                                    child: const Text(
-                                      'Ulangi Kuis',
-                                      style: TextStyle(color: AppColors.primary),
-                                    ),
-                                  ),
-                                ),
-                              ],
+                                );
+                              },
                             ),
                           ),
-                        ],
-                      ),
-                    ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -18,6 +18,8 @@ import 'screens/article_screen.dart';
 import 'screens/product_screen.dart';
 import 'screens/result_screen.dart';
 import 'screens/store_single_product.dart';
+import 'screens/address_screen.dart';
+import 'screens/order_history_screen.dart';
 
 // Providers & Constants
 import 'providers/theme_provider.dart';
@@ -35,7 +37,15 @@ void main() {
         // Initialize AuthProvider and call initialize() to check login status
         ChangeNotifierProvider(create: (_) => AuthProvider()..initialize()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
-        ChangeNotifierProvider(create: (_) => CartProvider()),
+        ChangeNotifierProxyProvider<AuthProvider, CartProvider>(
+          create: (context) => CartProvider(), // No parameter needed now
+          update: (context, authProvider, cartProvider) {
+            // Auto-update cart saat auth state berubah
+            final userId = authProvider.isLoggedIn ? authProvider.pb.authStore.model?.id : null;
+            cartProvider?.updateAuthState(authProvider.pb, userId);
+            return cartProvider ?? CartProvider();
+          },
+        ),
       ],
       child: const SkinAnalyzerApp(),
     ),
@@ -73,10 +83,14 @@ class SkinAnalyzerApp extends StatelessWidget {
         '/profile': (context) => const ProfileScreen(),
         '/edit_profile': (context) => const EditProfileScreen(),
         '/products': (context) => const ProductScreen(),
+        '/store_single_product': (context) => const StoreSingleProduct(), // Tambah route ini
         '/payment_success': (context) => const PaymentSuccessScreen(),
         '/articles': (context) => const ArticleScreen(),
         '/cart': (context) => const CartScreen(),
-        '/login': (context) => const LoginScreen() // Kept as in original code
+        '/login': (context) => const LoginScreen(),
+        '/payment': (context) => const PaymentScreen(), // Fixed: removed totalPrice parameter
+        '/addresses': (context) => const AddressScreen(),
+        '/order_history': (context) => const OrderHistoryScreen(),
       },
       onGenerateRoute: (settings) {
         switch (settings.name) {
@@ -94,15 +108,6 @@ class SkinAnalyzerApp extends StatelessWidget {
             if (cart != null) {
               return MaterialPageRoute(
                 builder: (_) => CheckoutScreen(cart: cart),
-              );
-            }
-            break;
-
-          case '/payment':
-            final total = settings.arguments as double?;
-            if (total != null) {
-              return MaterialPageRoute(
-                builder: (_) => PaymentScreen(totalPrice: total),
               );
             }
             break;

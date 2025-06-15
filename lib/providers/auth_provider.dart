@@ -71,6 +71,7 @@ class AuthProvider extends ChangeNotifier {
         email: userData.data['email'] ?? 'user@email.com',
         phone: userData.data['phone'] ?? '',
         skinType: userData.data['skin_type'] ?? 'Belum dianalisis',
+        avatarUrl: userData.data['avatar'] ?? '',
       );
       
       // Load user address
@@ -206,6 +207,7 @@ class AuthProvider extends ChangeNotifier {
         'name': user.username,
         'phone': user.phone,
         'skin_type': user.skinType,
+        'avatar': user.avatarUrl ?? '',
       });
       
       _currentUser = User(
@@ -214,6 +216,7 @@ class AuthProvider extends ChangeNotifier {
         email: updatedRecord.data['email'] ?? 'user@email.com',
         phone: updatedRecord.data['phone'] ?? '',
         skinType: updatedRecord.data['skin_type'] ?? 'Belum dianalisis',
+        avatarUrl: updatedRecord.data['avatar'] ?? '',
       );
 
       _isLoading = false;
@@ -313,7 +316,6 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-   
   // Check if user is authenticated
   Future<bool> isAuthenticated() async {
     if (pb.authStore.isValid) {
@@ -346,7 +348,6 @@ class AuthProvider extends ChangeNotifier {
     print('User is not authenticated');
     return false;
   }
-
 
   // Clear error message
   void clearError() {
