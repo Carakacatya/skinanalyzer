@@ -20,6 +20,7 @@ import 'screens/result_screen.dart';
 import 'screens/store_single_product.dart';
 import 'screens/address_screen.dart';
 import 'screens/order_history_screen.dart';
+import 'screens/home_screen.dart';
 
 // Providers & Constants
 import 'providers/theme_provider.dart';
@@ -83,23 +84,30 @@ class SkinAnalyzerApp extends StatelessWidget {
         '/profile': (context) => const ProfileScreen(),
         '/edit_profile': (context) => const EditProfileScreen(),
         '/products': (context) => const ProductScreen(),
-        '/store_single_product': (context) => const StoreSingleProduct(), // Tambah route ini
+        '/store_single_product': (context) => const StoreSingleProduct(),
         '/payment_success': (context) => const PaymentSuccessScreen(),
         '/articles': (context) => const ArticleScreen(),
         '/cart': (context) => const CartScreen(),
         '/login': (context) => const LoginScreen(),
-        '/payment': (context) => const PaymentScreen(), // Fixed: removed totalPrice parameter
+        '/payment': (context) => const PaymentScreen(),
         '/addresses': (context) => const AddressScreen(),
         '/order_history': (context) => const OrderHistoryScreen(),
+        '/home': (context) => const HomeScreen(),
+        '/quiz': (context) => const QuizScreen(),
+        '/store_single_product': (context) => const StoreSingleProduct(),
       },
       onGenerateRoute: (settings) {
         switch (settings.name) {
           case '/productDetail':
             final args = settings.arguments as Map<String, dynamic>?;
             if (args != null) {
-              return MaterialPageRoute(
-                builder: (_) => ProductDetailScreen(product: args),
-              );
+              // Ambil productId dari args, bukan seluruh product object
+              final productId = args['id']?.toString() ?? args['productId']?.toString();
+              if (productId != null) {
+                return MaterialPageRoute(
+                  builder: (_) => ProductDetailScreen(productId: productId),
+                );
+              }
             }
             break;
 
@@ -113,10 +121,13 @@ class SkinAnalyzerApp extends StatelessWidget {
             break;
 
           case '/result':
-            final skinType = settings.arguments as String?;
-            if (skinType != null) {
+            final args = settings.arguments as Map<String, dynamic>?;
+            if (args != null && args['skinType'] != null && args['analysisResult'] != null) {
               return MaterialPageRoute(
-                builder: (_) => ResultScreen(skinType: skinType),
+                builder: (_) => ResultScreen(
+                  skinType: args['skinType'],
+                  analysisResult: args['analysisResult'],
+                ),
               );
             }
             break;

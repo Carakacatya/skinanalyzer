@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:pocketbase/pocketbase.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
 import '../models/user_model.dart';
 
 class AuthProvider extends ChangeNotifier {
@@ -48,6 +50,7 @@ class AuthProvider extends ChangeNotifier {
       }
     } catch (e) {
       _errorMessage = 'Gagal menginisialisasi autentikasi: ${e.toString()}';
+      print('Initialize error: $e');
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -65,13 +68,20 @@ class AuthProvider extends ChangeNotifier {
       final userId = recordModel.id;
       final userData = await pb.collection('users').getOne(userId);
       
+      // Build avatar URL if exists
+      String? avatarUrl;
+      if (userData.data['avatar'] != null && userData.data['avatar'].toString().isNotEmpty) {
+        avatarUrl = pb.files.getUrl(userData, userData.data['avatar']).toString();
+        print('Avatar URL: $avatarUrl'); // Debug log
+      }
+      
       _currentUser = User(
         id: userData.id,
         username: userData.data['name'] ?? 'Nama Pengguna',
         email: userData.data['email'] ?? 'user@email.com',
         phone: userData.data['phone'] ?? '',
         skinType: userData.data['skin_type'] ?? 'Belum dianalisis',
-        avatarUrl: userData.data['avatar'] ?? '',
+        avatarUrl: avatarUrl,
       );
       
       // Load user address
@@ -79,6 +89,7 @@ class AuthProvider extends ChangeNotifier {
       
     } catch (e) {
       _errorMessage = 'Gagal memuat data user: ${e.toString()}';
+      print('Load user data error: $e');
     }
   }
 
@@ -194,7 +205,7 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  // Update profile method
+  // Update profile method (without image)
   Future<bool> updateProfile(User user) async {
     if (_currentUser == null) return false;
 
@@ -207,8 +218,13 @@ class AuthProvider extends ChangeNotifier {
         'name': user.username,
         'phone': user.phone,
         'skin_type': user.skinType,
-        'avatar': user.avatarUrl ?? '',
       });
+      
+      // Build avatar URL if exists
+      String? avatarUrl;
+      if (updatedRecord.data['avatar'] != null && updatedRecord.data['avatar'].toString().isNotEmpty) {
+        avatarUrl = pb.files.getUrl(updatedRecord, updatedRecord.data['avatar']).toString();
+      }
       
       _currentUser = User(
         id: updatedRecord.id,
@@ -216,7 +232,7 @@ class AuthProvider extends ChangeNotifier {
         email: updatedRecord.data['email'] ?? 'user@email.com',
         phone: updatedRecord.data['phone'] ?? '',
         skinType: updatedRecord.data['skin_type'] ?? 'Belum dianalisis',
-        avatarUrl: updatedRecord.data['avatar'] ?? '',
+        avatarUrl: avatarUrl,
       );
 
       _isLoading = false;
@@ -224,6 +240,116 @@ class AuthProvider extends ChangeNotifier {
       return true;
     } catch (e) {
       _errorMessage = 'Update profil gagal: ${e.toString()}';
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // Update profile with image using HTTP multipart request
+  Future<bool> updateProfileWithImage(User user, Uint8List? imageBytes, String? imageName) async {
+    if (_currentUser == null) return false;
+
+    try {
+      _isLoading = true;
+      _errorMessage = null;
+      notifyListeners();
+
+      print('Starting profile update with image...');
+      print('Image bytes length: ${imageBytes?.length}');
+      print('Image name: $imageName');
+
+      if (imageBytes != null && imageName != null) {
+        // Use HTTP multipart request for file upload
+        final uri = Uri.parse('${pb.baseUrl}/api/collections/users/records/${_currentUser!.id}');
+        final request = http.MultipartRequest('PATCH', uri);
+        
+        // Add authorization header
+        request.headers['Authorization'] = pb.authStore.token;
+        
+        // Add form fields
+        request.fields['name'] = user.username;
+        request.fields['phone'] = user.phone;
+        request.fields['skin_type'] = user.skinType;
+        
+        // Add file
+        request.files.add(
+          http.MultipartFile.fromBytes(
+            'avatar',
+            imageBytes,
+            filename: imageName,
+          ),
+        );
+        
+        print('Sending multipart request...');
+        final response = await request.send();
+        final responseBody = await response.stream.bytesToString();
+        
+        print('Response status: ${response.statusCode}');
+        print('Response body: $responseBody');
+        
+        if (response.statusCode == 200) {
+          final responseData = jsonDecode(responseBody);
+          
+          // Build avatar URL
+          String? avatarUrl;
+          if (responseData['avatar'] != null && responseData['avatar'].toString().isNotEmpty) {
+            // Create a temporary RecordModel to get the URL
+            final tempRecord = RecordModel.fromJson(responseData);
+            avatarUrl = pb.files.getUrl(tempRecord, responseData['avatar']).toString();
+            print('New avatar URL: $avatarUrl');
+          }
+          
+          _currentUser = User(
+            id: responseData['id'],
+            username: responseData['name'] ?? 'Nama Pengguna',
+            email: responseData['email'] ?? 'user@email.com',
+            phone: responseData['phone'] ?? '',
+            skinType: responseData['skin_type'] ?? 'Belum dianalisis',
+            avatarUrl: avatarUrl,
+          );
+          
+          print('Profile update completed successfully');
+          _isLoading = false;
+          notifyListeners();
+          return true;
+        } else {
+          throw Exception('HTTP ${response.statusCode}: $responseBody');
+        }
+      } else {
+        // Update without image using regular PocketBase method
+        print('No image provided, updating profile only...');
+        final updatedRecord = await pb.collection('users').update(
+          _currentUser!.id,
+          body: {
+            'name': user.username,
+            'phone': user.phone,
+            'skin_type': user.skinType,
+          },
+        );
+        
+        // Keep existing avatar URL
+        String? avatarUrl;
+        if (updatedRecord.data['avatar'] != null && updatedRecord.data['avatar'].toString().isNotEmpty) {
+          avatarUrl = pb.files.getUrl(updatedRecord, updatedRecord.data['avatar']).toString();
+        }
+        
+        _currentUser = User(
+          id: updatedRecord.id,
+          username: updatedRecord.data['name'] ?? 'Nama Pengguna',
+          email: updatedRecord.data['email'] ?? 'user@email.com',
+          phone: updatedRecord.data['phone'] ?? '',
+          skinType: updatedRecord.data['skin_type'] ?? 'Belum dianalisis',
+          avatarUrl: avatarUrl,
+        );
+        
+        _isLoading = false;
+        notifyListeners();
+        return true;
+      }
+    } catch (e) {
+      _errorMessage = 'Update profil gagal: ${e.toString()}';
+      print('Update profile error: $e');
       _isLoading = false;
       notifyListeners();
       return false;

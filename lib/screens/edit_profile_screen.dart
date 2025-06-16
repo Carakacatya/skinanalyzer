@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
-import 'dart:io';
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import '../constants/colors.dart';
 import '../providers/auth_provider.dart';
 import '../models/user_model.dart';
@@ -27,7 +28,8 @@ class _EditProfileScreenState extends State<EditProfileScreen>
   String? _selectedSkinType;
   bool _isLoading = false;
   bool _isInitialized = false;
-  File? _selectedImage;
+  Uint8List? _selectedImageBytes;
+  String? _selectedImageName;
   String? _currentAvatarUrl;
   
   // Animation Controllers
@@ -193,41 +195,24 @@ class _EditProfileScreenState extends State<EditProfileScreen>
         );
         
         if (image != null) {
+          final bytes = await image.readAsBytes();
+          print('Image picked: ${image.name}, size: ${bytes.length} bytes'); // Debug log
+          
           setState(() {
-            _selectedImage = File(image.path);
+            _selectedImageBytes = bytes;
+            _selectedImageName = image.name;
           });
+          
+          print('Image state updated successfully'); // Debug log
         }
       }
     } catch (e) {
+      print('Error picking image: $e'); // Debug log
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error picking image: $e')),
         );
       }
-    }
-  }
-
-  Future<String?> _uploadAvatar() async {
-    if (_selectedImage == null) return _currentAvatarUrl;
-    
-    try {
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      // Here you would implement the actual file upload to your backend
-      // For now, we'll simulate it by returning a placeholder URL
-      
-      // In a real implementation, you would:
-      // 1. Upload the file to your storage service (Firebase, AWS S3, etc.)
-      // 2. Get the download URL
-      // 3. Return the URL
-      
-      // Simulated upload delay
-      await Future.delayed(const Duration(seconds: 1));
-      
-      // Return a placeholder URL (in real app, this would be the actual uploaded URL)
-      return 'https://via.placeholder.com/150/EC407A/FFFFFF?text=${_usernameController.text.substring(0, 1).toUpperCase()}';
-    } catch (e) {
-      print('Error uploading avatar: $e');
-      return _currentAvatarUrl;
     }
   }
 
@@ -248,20 +233,29 @@ class _EditProfileScreenState extends State<EditProfileScreen>
         throw Exception('User ID not found. Please log in again.');
       }
 
-      // Upload avatar if selected
-      final avatarUrl = await _uploadAvatar();
+      print('Saving profile...'); // Debug log
+      print('Has image: ${_selectedImageBytes != null}'); // Debug log
 
-      // Update user profile
+      // Create updated user object
       final updatedUser = User(
         id: user.id,
         username: _usernameController.text.trim(),
         email: user.email,
         phone: _phoneController.text.trim(),
         skinType: _selectedSkinType ?? 'Belum dianalisis',
-        avatarUrl: avatarUrl,
+        avatarUrl: user.avatarUrl,
       );
       
-      await authProvider.updateProfile(updatedUser);
+      // Update profile with image if selected
+      final success = await authProvider.updateProfileWithImage(
+        updatedUser, 
+        _selectedImageBytes, 
+        _selectedImageName,
+      );
+
+      if (!success) {
+        throw Exception('Failed to update profile');
+      }
       
       // Update address
       final address = Address(
@@ -277,6 +271,13 @@ class _EditProfileScreenState extends State<EditProfileScreen>
       
       await authProvider.updateAddress(address);
 
+      // Clear selected image after successful save
+      setState(() {
+        _selectedImageBytes = null;
+        _selectedImageName = null;
+        _currentAvatarUrl = authProvider.currentUser?.avatarUrl;
+      });
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -290,6 +291,7 @@ class _EditProfileScreenState extends State<EditProfileScreen>
         Navigator.pop(context, true);
       }
     } catch (e) {
+      print('Save profile error: $e'); // Debug log
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -335,10 +337,10 @@ class _EditProfileScreenState extends State<EditProfileScreen>
                 ),
               ],
             ),
-            child: _selectedImage != null
+            child: _selectedImageBytes != null
                 ? ClipOval(
-                    child: Image.file(
-                      _selectedImage!,
+                    child: Image.memory(
+                      _selectedImageBytes!,
                       width: 120,
                       height: 120,
                       fit: BoxFit.cover,
@@ -351,7 +353,17 @@ class _EditProfileScreenState extends State<EditProfileScreen>
                           width: 120,
                           height: 120,
                           fit: BoxFit.cover,
+                          loadingBuilder: (context, child, loadingProgress) {
+                            if (loadingProgress == null) return child;
+                            return const Center(
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            );
+                          },
                           errorBuilder: (context, error, stackTrace) {
+                            print('Error loading avatar: $error'); // Debug log
                             return const Icon(
                               Icons.person,
                               size: 60,
@@ -509,6 +521,18 @@ class _EditProfileScreenState extends State<EditProfileScreen>
                             color: Colors.grey[600],
                           ),
                         ),
+                        if (_selectedImageBytes != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              'Gambar baru dipilih ✓',
+                              style: GoogleFonts.poppins(
+                                fontSize: 12,
+                                color: Colors.green,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
                       ],
                     ),
                   ),

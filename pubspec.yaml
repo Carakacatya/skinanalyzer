@@ -40,6 +40,8 @@ dependencies:
   animations: ^2.0.8
   confetti: ^0.7.0
   image_picker: ^1.0.4
+  flutter_rating_bar: ^4.0.1
+  cached_network_image: ^3.3.0
 
 
   # The following adds the Cupertino Icons font to your application.
@@ -63,8 +65,7 @@ dev_dependencies:
 # The following section is specific to Flutter packages.
 flutter:
   assets:
-    - assets/images/home_illustration.png
-    - assets/images/login_illustration.png
+    - assets/images/logo.png
     - assets/images/register_illustration.png
     - assets/images/user_placeholder.png
     - assets/images/skin_home.png

@@ -1,511 +1,964 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:pocketbase/pocketbase.dart';
-import '../constants/colors.dart';
 import '../providers/auth_provider.dart';
-import '../models/user_model.dart';
+import 'main_nav_screen.dart';
 
 class ResultScreen extends StatefulWidget {
   final String skinType;
+  final Map<String, dynamic> analysisResult;
 
-  const ResultScreen({super.key, required this.skinType});
+  const ResultScreen({
+    super.key,
+    required this.skinType,
+    required this.analysisResult,
+  });
 
   @override
   State<ResultScreen> createState() => _ResultScreenState();
 }
 
-class _ResultScreenState extends State<ResultScreen> {
-  List<Map<String, dynamic>> recommendedProducts = [];
-  List<String> skinTips = [];
-  bool _isLoading = true;
-  String? _errorMessage;
-  Map<String, dynamic>? _skinTypeData;
+class _ResultScreenState extends State<ResultScreen>
+    with TickerProviderStateMixin {
+  List<Map<String, dynamic>> _recommendedProducts = [];
+  bool _isLoadingProducts = true;
+  
+  // Animation Controllers
+  late AnimationController _fadeController;
+  late AnimationController _slideController;
+  late AnimationController _scaleController;
+  late Animation<double> _fadeAnimation;
+  late Animation<Offset> _slideAnimation;
+  late Animation<double> _scaleAnimation;
 
   @override
   void initState() {
     super.initState();
-    _initialize();
-  }
-
-  Future<void> _initialize() async {
-    await _saveSkinType();
-    await _fetchSkinTypeData();
-    await _fetchRecommendedProducts();
     
-    setState(() {
-      _isLoading = false;
-    });
-  }
-
-  Future<void> _saveSkinType() async {
-    final prefs = await SharedPreferences.getInstance();
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    // Initialize Animation Controllers
+    _fadeController = AnimationController(
+      duration: const Duration(milliseconds: 800),
+      vsync: this,
+    );
     
-    // Save skin type to SharedPreferences
-    await prefs.setString('skinType', widget.skinType);
+    _slideController = AnimationController(
+      duration: const Duration(milliseconds: 600),
+      vsync: this,
+    );
     
-    // Check if user is logged in
-    if (!authProvider.isLoggedIn) {
-      print('User not logged in, skipping profile update');
-      return;
-    }
-
-    try {
-      print('Updating user profile with skin type: ${widget.skinType}');
-      final updatedUser = authProvider.currentUser!.copyWith(skinType: widget.skinType);
-      await authProvider.updateProfile(updatedUser);
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Jenis kulit berhasil disimpan')),
-        );
-      }
-    } catch (e) {
-      print('Error saving skin type: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error saving skin type: $e')),
-        );
-      }
-    }
-  }
-
-  // Fungsi untuk mengambil data skin type dari PocketBase
-  Future<void> _fetchSkinTypeData() async {
-    try {
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      final pb = authProvider.pb;
-      
-      print('Fetching skin type data for: ${widget.skinType}');
-      
-      // Cari skin type berdasarkan nama
-      final resultList = await pb.collection('skin_types').getList(
-        filter: 'nama = "${widget.skinType}"',
-        page: 1,
-        perPage: 1,
-      );
-      
-      if (resultList.items.isEmpty) {
-        print('Skin type not found, trying case-insensitive search');
-        // Coba pencarian case-insensitive jika tidak ditemukan
-        final resultListCaseInsensitive = await pb.collection('skin_types').getList(
-          filter: 'nama ~ "${widget.skinType}"',
-          page: 1,
-          perPage: 1,
-        );
-        
-        if (resultListCaseInsensitive.items.isEmpty) {
-          print('Skin type still not found');
-          setState(() {
-            _skinTypeData = null;
-            skinTips = [];
-          });
-          return;
-        }
-        
-        _processSkinTypeData(resultListCaseInsensitive.items[0]);
-      } else {
-        _processSkinTypeData(resultList.items[0]);
-      }
-    } catch (e) {
-      print('Error fetching skin type data: $e');
-      setState(() {
-        skinTips = [];
-      });
-    }
+    _scaleController = AnimationController(
+      duration: const Duration(milliseconds: 400),
+      vsync: this,
+    );
+    
+    // Initialize Animations
+    _fadeAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _fadeController,
+      curve: Curves.easeInOut,
+    ));
+    
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.3),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _slideController,
+      curve: Curves.easeOutCubic,
+    ));
+    
+    _scaleAnimation = Tween<double>(
+      begin: 0.8,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _scaleController,
+      curve: Curves.elasticOut,
+    ));
+    
+    _saveSkinTypeResult();
+    _loadRecommendedProducts();
+    _startEntranceAnimations();
   }
   
-  // Proses data skin type dari PocketBase
-  void _processSkinTypeData(RecordModel record) {
-    print('Processing skin type data: ${record.id}');
-    
-    final description = record.data['description'] as String? ?? '';
-    
-    // Ekstrak tips dari deskripsi (asumsikan tips dipisahkan dengan titik)
-    final tipsList = description
-        .split('.')
-        .where((tip) => tip.trim().isNotEmpty)
-        .map((tip) => tip.trim())
-        .toList();
-    
-    setState(() {
-      _skinTypeData = {
-        'id': record.id,
-        'nama': record.data['nama'] ?? '',
-        'description': description,
-      };
-      
-      skinTips = tipsList;
+  void _startEntranceAnimations() {
+    _fadeController.forward();
+    Future.delayed(const Duration(milliseconds: 200), () {
+      _slideController.forward();
     });
-    
-    print('Extracted ${skinTips.length} tips from description');
+    Future.delayed(const Duration(milliseconds: 400), () {
+      _scaleController.forward();
+    });
   }
 
-  // Konversi nama skin type ke format yang sesuai dengan PocketBase
-  String _normalizeSkinType(String skinType) {
-    // Konversi ke lowercase dan hapus spasi
-    final normalized = skinType.toLowerCase().trim();
-    
-    // Map nama skin type ke nilai yang disimpan di PocketBase
-    switch (normalized) {
-      case 'kering':
-        return 'dry';
-      case 'berminyak':
-        return 'oily';
-      case 'sensitif':
-        return 'sensitive';
-      case 'kombinasi':
-        return 'combination';
-      default:
-        return normalized;
+  @override
+  void dispose() {
+    _fadeController.dispose();
+    _slideController.dispose();
+    _scaleController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveSkinTypeResult() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('skinType', widget.skinType);
+      
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      if (authProvider.isLoggedIn) {
+        final userId = authProvider.pb.authStore.model?.id;
+        if (userId != null) {
+          await authProvider.pb.collection('users').update(userId, body: {
+            'skin_type': widget.skinType,
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Error saving skin type: $e');
     }
   }
 
-  Future<void> _fetchRecommendedProducts() async {
+  Future<void> _loadRecommendedProducts() async {
     try {
-      setState(() {
-        _isLoading = true;
-        _errorMessage = null;
-      });
-
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final pb = authProvider.pb;
       
-      // Normalize skin type untuk query
-      final normalizedSkinType = _normalizeSkinType(widget.skinType);
-      print('Fetching products for normalized skin type: $normalizedSkinType');
+      // Get skin type keywords for better matching
+      final skinTypeKeywords = _getSkinTypeKeywords(widget.skinType);
       
-      // Buat filter untuk skin_type yang merupakan array/multiple select
-      // Gunakan operator "?~" untuk mencari nilai dalam array
-      final filter = 'skin_type ?~ "$normalizedSkinType"';
-      print('Using filter: $filter');
-      
-      // Fetch products dengan filter skin_type
-      final resultList = await pb.collection('products').getList(
-        filter: filter,
-        sort: '-created',
+      // Fetch all products first
+      final allProducts = await pb.collection('products').getList(
         page: 1,
-        perPage: 10,
+        perPage: 100,
+        sort: '-created',
       );
       
-      print('Products found with filter: ${resultList.items.length}');
+      List<Map<String, dynamic>> matchedProducts = [];
       
-      // Debug: Print semua produk yang ditemukan
-      for (var item in resultList.items) {
-        print('Product: ${item.id} - ${item.data['name']} - Skin Types: ${item.data['skin_type']}');
-      }
-      
-      // Jika tidak ada produk yang ditemukan dengan filter, coba ambil semua produk
-      if (resultList.items.isEmpty) {
-        print('No products found with filter, fetching all products');
-        final allProducts = await pb.collection('products').getList(
-          page: 1,
-          perPage: 50,
-        );
-        
-        // Filter secara manual berdasarkan nama dan deskripsi
-        final filteredProducts = allProducts.items.where((record) {
-          final name = record.data['name']?.toString().toLowerCase() ?? '';
-          final description = record.data['description']?.toString().toLowerCase() ?? '';
-          
-          // Map skin types to keywords
-          Map<String, List<String>> skinTypeKeywords = {
-            'kering': ['kering', 'dry', 'moisturizer', 'hydrating', 'soy'],
-            'berminyak': ['berminyak', 'oily', 'acne', 'matte', 'oil-free'],
-            'sensitif': ['sensitif', 'sensitive', 'gentle', 'calm', 'soothe'],
-            'kombinasi': ['kombinasi', 'combination', 'balance', 'dual']
-          };
-          
-          // Get keywords for the user's skin type
-          List<String> keywords = skinTypeKeywords[widget.skinType.toLowerCase()] ?? [];
-          
-          // Check if product name or description contains any of the keywords
-          for (var keyword in keywords) {
-            if (name.contains(keyword) || description.contains(keyword)) {
-              return true;
-            }
-          }
-          
-          return false;
-        }).toList();
-        
-        print('Manually filtered products: ${filteredProducts.length}');
-        
-        // Ambil maksimal 2 produk
-        final limitedProducts = filteredProducts.take(2).toList();
-        
-        // Jika masih tidak cukup, ambil produk acak
-        if (limitedProducts.length < 2 && allProducts.items.isNotEmpty) {
-          final remainingCount = 2 - limitedProducts.length;
-          final randomProducts = allProducts.items
-              .where((record) => !limitedProducts.contains(record))
-              .take(remainingCount)
-              .toList();
-          limitedProducts.addAll(randomProducts);
-        }
-        
-        final mappedProducts = limitedProducts.map((record) {
-          return {
-            'id': record.id,
-            'name': record.data['name'] ?? '',
-            'price': record.data['price'] ?? 0,
-            'description': record.data['description'] ?? '',
-            'image_url': record.data['image_url'] ?? '',
-            'rating': record.data['rating'] ?? 0,
-            'skin_type': record.data['skin_type'] ?? [],
-          };
-        }).toList();
-        
-        setState(() {
-          recommendedProducts = mappedProducts;
-          _isLoading = false;
-        });
-        return;
-      }
-      
-      // Ambil maksimal 2 produk dari hasil filter
-      final limitedRecords = resultList.items.take(2).toList();
-      
-      final fetchedProducts = limitedRecords.map((record) {
-        return {
+      for (var record in allProducts.items) {
+        final product = {
           'id': record.id,
           'name': record.data['name'] ?? '',
           'price': record.data['price'] ?? 0,
-          'description': record.data['description'] ?? '',
           'image_url': record.data['image_url'] ?? '',
+          'description': record.data['description'] ?? '',
           'rating': record.data['rating'] ?? 0,
           'skin_type': record.data['skin_type'] ?? [],
+          'brand': record.data['brand'] ?? '',
         };
-      }).toList();
+        
+        // Check if product matches user's skin type
+        bool isMatch = false;
+        final productSkinTypes = product['skin_type'];
+        
+        if (productSkinTypes is List) {
+          for (var productType in productSkinTypes) {
+            final normalizedProductType = productType.toString().toLowerCase().trim();
+            for (var keyword in skinTypeKeywords) {
+              if (normalizedProductType == keyword.toLowerCase() || 
+                  normalizedProductType.contains(keyword.toLowerCase())) {
+                isMatch = true;
+                break;
+              }
+            }
+            if (isMatch) break;
+          }
+        } else if (productSkinTypes is String && productSkinTypes.isNotEmpty) {
+          final normalizedProductType = productSkinTypes.toLowerCase().trim();
+          for (var keyword in skinTypeKeywords) {
+            if (normalizedProductType == keyword.toLowerCase() || 
+                normalizedProductType.contains(keyword.toLowerCase())) {
+              isMatch = true;
+              break;
+            }
+          }
+        }
+        
+        // Also check product name and description for keywords
+        if (!isMatch) {
+          final name = product['name']?.toString().toLowerCase() ?? '';
+          final description = product['description']?.toString().toLowerCase() ?? '';
+          final contentKeywords = _getContentKeywords(widget.skinType);
+          
+          for (var keyword in contentKeywords) {
+            if (name.contains(keyword.toLowerCase()) || 
+                description.contains(keyword.toLowerCase())) {
+              isMatch = true;
+              break;
+            }
+          }
+        }
+        
+        if (isMatch) {
+          matchedProducts.add(product);
+        }
+      }
+      
+      // Limit to 4 products for compact display
+      if (matchedProducts.length > 4) {
+        matchedProducts = matchedProducts.sublist(0, 4);
+      }
       
       setState(() {
-        recommendedProducts = fetchedProducts;
-        _isLoading = false;
+        _recommendedProducts = matchedProducts;
+        _isLoadingProducts = false;
       });
+      
     } catch (e) {
-      print('Error fetching recommended products: $e');
+      debugPrint('Error loading recommended products: $e');
       setState(() {
-        _errorMessage = 'Gagal memuat produk: $e';
-        _isLoading = false;
+        _isLoadingProducts = false;
       });
     }
   }
 
-  void _goToProductScreen() {
-    Navigator.pushNamed(context, '/products');
+  List<String> _getSkinTypeKeywords(String skinType) {
+    final normalized = skinType.toLowerCase().trim();
+    
+    switch (normalized) {
+      case 'kering':
+        return ['kering', 'dry'];
+      case 'berminyak':
+        return ['berminyak', 'oily'];
+      case 'sensitif':
+        return ['sensitif', 'sensitive'];
+      case 'kombinasi':
+        return ['kombinasi', 'combination'];
+      case 'dry':
+        return ['dry', 'kering'];
+      case 'oily':
+        return ['oily', 'berminyak'];
+      case 'sensitive':
+        return ['sensitive', 'sensitif'];
+      case 'combination':
+        return ['combination', 'kombinasi'];
+      default:
+        return [normalized];
+    }
+  }
+  
+  List<String> _getContentKeywords(String skinType) {
+    final normalized = skinType.toLowerCase().trim();
+    
+    Map<String, List<String>> contentKeywords = {
+      'kering': ['moisturizer', 'hydrating', 'soy', 'hyaluronic', 'ceramide', 'dry', 'pelembab', 'lembab'],
+      'berminyak': ['acne', 'matte', 'oil-free', 'salicylic', 'niacinamide', 'oily', 'jerawat', 'berminyak'],
+      'sensitif': ['gentle', 'calm', 'soothe', 'fragrance-free', 'hypoallergenic', 'sensitive', 'lembut', 'sensitif'],
+      'kombinasi': ['balance', 'dual', 'combination', 'lightweight', 'seimbang', 'kombinasi'],
+      'dry': ['moisturizer', 'hydrating', 'soy', 'hyaluronic', 'ceramide', 'pelembab', 'lembab'],
+      'oily': ['acne', 'matte', 'oil-free', 'salicylic', 'niacinamide', 'jerawat', 'berminyak'],
+      'sensitive': ['gentle', 'calm', 'soothe', 'fragrance-free', 'hypoallergenic', 'lembut', 'sensitif'],
+      'combination': ['balance', 'dual', 'lightweight', 'seimbang', 'kombinasi'],
+    };
+    
+    return contentKeywords[normalized] ?? [];
   }
 
-  void _goBackToHome() {
-    Navigator.pushNamedAndRemoveUntil(context, '/main', (route) => false);
+  String _getSkinTypeDescription(String skinType) {
+    switch (skinType.toLowerCase()) {
+      case 'kering':
+      case 'dry':
+        return 'Kulit kering membutuhkan hidrasi ekstra dan produk yang dapat mempertahankan kelembaban alami kulit.';
+      case 'berminyak':
+      case 'oily':
+        return 'Kulit berminyak memerlukan produk yang dapat mengontrol produksi minyak berlebih tanpa membuat kulit kering.';
+      case 'sensitif':
+      case 'sensitive':
+        return 'Kulit sensitif membutuhkan produk yang lembut, bebas dari bahan kimia keras dan pewangi yang dapat menyebabkan iritasi.';
+      case 'kombinasi':
+      case 'combination':
+        return 'Kulit kombinasi memerlukan perawatan yang seimbang untuk area berminyak dan kering pada wajah.';
+      default:
+        return 'Jenis kulit Anda memerlukan perawatan khusus sesuai dengan karakteristiknya.';
+    }
   }
 
-  void _goToCart() {
-    Navigator.pushNamed(context, '/cart');
+  List<String> _getSkinCareTips(String skinType) {
+    switch (skinType.toLowerCase()) {
+      case 'kering':
+      case 'dry':
+        return [
+          'Gunakan pembersih yang lembut dan tidak mengandung alkohol',
+          'Aplikasikan pelembab segera setelah mandi saat kulit masih lembab',
+          'Gunakan humidifier di ruangan untuk menjaga kelembaban udara',
+          'Hindari air panas saat mandi atau mencuci wajah',
+          'Pilih produk dengan kandungan hyaluronic acid dan ceramide'
+        ];
+      case 'berminyak':
+      case 'oily':
+        return [
+          'Bersihkan wajah 2 kali sehari dengan pembersih yang mengandung salicylic acid',
+          'Gunakan toner bebas alkohol untuk menyeimbangkan pH kulit',
+          'Pilih pelembab yang ringan dan oil-free',
+          'Gunakan clay mask 1-2 kali seminggu untuk mengontrol minyak',
+          'Jangan skip pelembab meski kulit berminyak'
+        ];
+      case 'sensitif':
+      case 'sensitive':
+        return [
+          'Pilih produk yang hypoallergenic dan bebas pewangi',
+          'Lakukan patch test sebelum menggunakan produk baru',
+          'Gunakan pembersih yang sangat lembut dan bebas sulfat',
+          'Hindari scrub atau exfoliating yang kasar',
+          'Gunakan sunscreen mineral dengan SPF minimal 30'
+        ];
+      case 'kombinasi':
+      case 'combination':
+        return [
+          'Gunakan produk yang berbeda untuk area T-zone dan pipi',
+          'Bersihkan wajah dengan gentle cleanser 2 kali sehari',
+          'Aplikasikan pelembab ringan di seluruh wajah',
+          'Gunakan clay mask hanya di area berminyak',
+          'Pilih produk dengan kandungan niacinamide untuk menyeimbangkan kulit'
+        ];
+      default:
+        return [
+          'Konsultasikan dengan dermatologist untuk perawatan yang tepat',
+          'Selalu gunakan sunscreen setiap hari',
+          'Jaga kebersihan wajah dengan rutin',
+          'Minum air yang cukup untuk hidrasi dari dalam',
+          'Hindari menyentuh wajah dengan tangan kotor'
+        ];
+    }
   }
 
   Widget _buildProductImage(String? imageUrl) {
     if (imageUrl == null || imageUrl.isEmpty) {
       return Container(
-        width: 50,
-        height: 50,
-        color: Colors.grey[200],
+        width: 70, // COMPACT SIZE FOR MOBILE
+        height: 70,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Colors.grey[100]!,
+              Colors.grey[50]!,
+            ],
+          ),
+        ),
         child: const Icon(
           Icons.image_not_supported,
-          size: 25,
+          size: 24,
           color: Colors.grey,
         ),
       );
     }
 
-    return Image.network(
-      imageUrl,
-      width: 50,
-      height: 50,
-      fit: BoxFit.cover,
-      loadingBuilder: (context, child, loadingProgress) {
-        if (loadingProgress == null) return child;
-        return Container(
-          width: 50,
-          height: 50,
-          color: Colors.grey[200],
-          child: Center(
-            child: CircularProgressIndicator(
-              value: loadingProgress.expectedTotalBytes != null
-                  ? loadingProgress.cumulativeBytesLoaded /
-                      loadingProgress.expectedTotalBytes!
-                  : null,
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: Image.network(
+        imageUrl,
+        width: 70, // COMPACT SIZE FOR MOBILE
+        height: 70,
+        fit: BoxFit.cover,
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          
+          return Container(
+            width: 70,
+            height: 70,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.grey[200]!,
+                  Colors.grey[100]!,
+                  Colors.grey[200]!,
+                ],
+                stops: const [0.0, 0.5, 1.0],
+              ),
             ),
-          ),
-        );
-      },
-      errorBuilder: (context, error, stackTrace) {
-        print('Error loading image: $error');
-        return Container(
-          width: 50,
-          height: 50,
-          color: Colors.grey[200],
-          child: const Icon(
-            Icons.broken_image,
-            size: 25,
-            color: Colors.grey,
-          ),
-        );
-      },
+            child: Center(
+              child: CircularProgressIndicator(
+                color: const Color(0xFFEC407A),
+                strokeWidth: 2,
+              ),
+            ),
+          );
+        },
+        errorBuilder: (context, error, stackTrace) {
+          return Container(
+            width: 70,
+            height: 70,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.grey[100]!,
+                  Colors.grey[50]!,
+                ],
+              ),
+            ),
+            child: const Icon(
+              Icons.broken_image,
+              size: 24,
+              color: Colors.grey,
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  String _formatPrice(double price) {
+    return price.toStringAsFixed(0);
+  }
+
+  void _goToAllProducts() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const MainNavScreen(initialIndex: 1),
+      ),
+    );
+  }
+
+  void _goBackToHome() {
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const MainNavScreen(initialIndex: 0),
+      ),
+      (route) => false,
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFFCE4EC),
       appBar: AppBar(
-        automaticallyImplyLeading: false,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: _goBackToHome,
-        ),
-        title: const Text('Hasil Kuis'),
-        backgroundColor: AppColors.primary,
-        centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _fetchRecommendedProducts,
-          ),
-          IconButton(
-            icon: const Icon(Icons.shopping_cart),
-            onPressed: _goToCart,
-          ),
-        ],
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _errorMessage != null
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        _errorMessage!,
-                        style: const TextStyle(color: Colors.red),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: _fetchRecommendedProducts,
-                        child: const Text('Coba Lagi'),
-                      ),
-                    ],
-                  ),
-                )
-              : Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: ListView(
-                    children: [
-                      Text(
-                        'Jenis kulitmu: ${widget.skinType}',
-                        style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.primary,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      const Text(
-                        'Tips untuk jenis kulitmu:',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      skinTips.isEmpty
-                          ? const Center(
-                              child: Padding(
-                                padding: EdgeInsets.symmetric(vertical: 10),
-                                child: Text(
-                                  'Tidak ada tips tersedia untuk jenis kulit ini',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontStyle: FontStyle.italic,
-                                  ),
-                                ),
-                              ),
-                            )
-                          : Column(
-                              children: skinTips.map((tip) => ListTile(
-                                leading: const Icon(Icons.check_circle_outline, color: AppColors.primary),
-                                title: Text(tip),
-                                visualDensity: VisualDensity.compact,
-                                contentPadding: EdgeInsets.zero,
-                              )).toList(),
-                            ),
-                      const SizedBox(height: 24),
-                      const Text(
-                        'Rekomendasi Produk:',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      recommendedProducts.isEmpty
-                          ? const Center(
-                              child: Padding(
-                                padding: EdgeInsets.symmetric(vertical: 20),
-                                child: Text(
-                                  'Tidak ada rekomendasi produk untuk jenis kulit ini',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontStyle: FontStyle.italic,
-                                  ),
-                                ),
-                              ),
-                            )
-                          : Column(
-                              children: recommendedProducts.map(
-                                (product) => Card(
-                                  margin: const EdgeInsets.symmetric(vertical: 8),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                  elevation: 3,
-                                  child: ListTile(
-                                    leading: _buildProductImage(product['image_url']),
-                                    title: Text(product['name']),
-                                    subtitle: Text('Rp ${product['price']}'),
-                                    trailing: ElevatedButton(
-                                      onPressed: _goToProductScreen,
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: AppColors.primary,
-                                        foregroundColor: Colors.white,
-                                      ),
-                                      child: const Text('Checkout'),
-                                    ),
-                                  ),
-                                ),
-                              ).toList(),
-                            ),
-                      const SizedBox(height: 80),
-                    ],
-                  ),
-                ),
-      bottomNavigationBar: Padding(
-        padding: const EdgeInsets.all(16),
-        child: ElevatedButton.icon(
-          onPressed: _goToProductScreen,
-          icon: const Icon(Icons.shopping_bag),
-          label: const Text('Lihat Semua Produk'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primary,
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
+        title: FadeTransition(
+          opacity: _fadeAnimation,
+          child: Text(
+            'Hasil Analisis',
+            style: GoogleFonts.poppins(
+              fontWeight: FontWeight.w600,
+              fontSize: 20,
+              color: Colors.white,
             ),
           ),
         ),
+        backgroundColor: const Color(0xFFF8BBD0),
+        centerTitle: true,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: _goBackToHome,
+        ),
       ),
+      body: _isLoadingProducts
+          ? Center( // CENTERED LOADING STATE FOR MOBILE
+              child: Padding(
+                padding: const EdgeInsets.all(20), // MOBILE PADDING
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 80,
+                      height: 80,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            const Color(0xFFF48FB1),
+                            const Color(0xFFEC407A),
+                          ],
+                        ),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.analytics,
+                        color: Colors.white,
+                        size: 40,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      'Memproses hasil analisis...',
+                      style: GoogleFonts.poppins(
+                        fontSize: 16,
+                        color: Colors.grey[700],
+                        fontWeight: FontWeight.w500,
+                      ),
+                      textAlign: TextAlign.center, // CENTERED TEXT FOR MOBILE
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(16), // COMPACT MOBILE PADDING
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Result Card - MOBILE OPTIMIZED
+                  FadeTransition(
+                    opacity: _fadeAnimation,
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(20), // COMPACT PADDING
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            const Color(0xFFF48FB1),
+                            const Color(0xFFEC407A),
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(16), // COMPACT RADIUS
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFFEC407A).withOpacity(0.3),
+                            blurRadius: 15,
+                            offset: const Offset(0, 6),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        children: [
+                          Container(
+                            width: 70, // COMPACT SIZE
+                            height: 70,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.2),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.face,
+                              size: 35, // COMPACT ICON
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(height: 12), // COMPACT SPACING
+                          Text(
+                            'Jenis Kulit Anda',
+                            style: GoogleFonts.poppins(
+                              fontSize: 14, // COMPACT FONT
+                              color: Colors.white.withOpacity(0.9),
+                              fontWeight: FontWeight.w500,
+                            ),
+                            textAlign: TextAlign.center, // CENTERED
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            widget.skinType.toUpperCase(),
+                            style: GoogleFonts.poppins(
+                              fontSize: 24, // COMPACT FONT
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                            textAlign: TextAlign.center, // CENTERED
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            _getSkinTypeDescription(widget.skinType),
+                            style: GoogleFonts.poppins(
+                              fontSize: 12, // COMPACT FONT
+                              color: Colors.white.withOpacity(0.9),
+                              height: 1.4,
+                            ),
+                            textAlign: TextAlign.center, // CENTERED
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 20), // COMPACT SPACING
+
+                  // Tips Section - MOBILE OPTIMIZED
+                  SlideTransition(
+                    position: _slideAnimation,
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16), // COMPACT PADDING
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            Colors.white,
+                            const Color(0xFFFCE4EC).withOpacity(0.3),
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(16), // COMPACT RADIUS
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFFEC407A).withOpacity(0.1),
+                            blurRadius: 15,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                        border: Border.all(
+                          color: const Color(0xFFEC407A).withOpacity(0.1),
+                          width: 1,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                width: 40, // COMPACT SIZE
+                                height: 40,
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      const Color(0xFFF48FB1),
+                                      const Color(0xFFEC407A),
+                                    ],
+                                  ),
+                                  borderRadius: BorderRadius.circular(12),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: const Color(0xFFEC407A).withOpacity(0.3),
+                                      blurRadius: 8,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: const Icon(
+                                  Icons.lightbulb_outline,
+                                  color: Colors.white,
+                                  size: 20, // COMPACT ICON
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Tips Perawatan',
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 16, // COMPACT FONT
+                                        fontWeight: FontWeight.bold,
+                                        color: const Color(0xFF333333),
+                                      ),
+                                    ),
+                                    Text(
+                                      'Khusus untuk kulit ${widget.skinType.toLowerCase()}',
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 10, // COMPACT FONT
+                                        color: const Color(0xFFEC407A),
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          ...(_getSkinCareTips(widget.skinType).asMap().entries.map((entry) {
+                            final index = entry.key;
+                            final tip = entry.value;
+                            
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 8), // COMPACT MARGIN
+                              padding: const EdgeInsets.all(12), // COMPACT PADDING
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: const Color(0xFFEC407A).withOpacity(0.1),
+                                  width: 1,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.03),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 1),
+                                  ),
+                                ],
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 24, // COMPACT SIZE
+                                    height: 24,
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        colors: [
+                                          const Color(0xFFF48FB1),
+                                          const Color(0xFFEC407A),
+                                        ],
+                                      ),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        '${index + 1}',
+                                        style: GoogleFonts.poppins(
+                                          color: Colors.white,
+                                          fontSize: 10, // COMPACT FONT
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      tip,
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 11, // COMPACT FONT
+                                        color: Colors.grey[800],
+                                        height: 1.4,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }).toList()),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Recommended Products Section - MOBILE OPTIMIZED
+                  ScaleTransition(
+                    scale: _scaleAnimation,
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16), // COMPACT PADDING
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.08),
+                            blurRadius: 12,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(6), // COMPACT PADDING
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFEC407A).withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Icon(
+                                  Icons.shopping_bag_outlined,
+                                  color: Color(0xFFEC407A),
+                                  size: 18, // COMPACT ICON
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                'Produk Rekomendasi',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 16, // COMPACT FONT
+                                  fontWeight: FontWeight.w600,
+                                  color: const Color(0xFF333333),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          
+                          if (_recommendedProducts.isEmpty)
+                            Center(
+                              child: Padding(
+                                padding: const EdgeInsets.all(20),
+                                child: Column(
+                                  children: [
+                                    Icon(
+                                      Icons.inventory_2_outlined,
+                                      size: 40, // COMPACT SIZE
+                                      color: Colors.grey[400],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      'Belum ada produk yang cocok untuk jenis kulit Anda',
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 12, // COMPACT FONT
+                                        color: Colors.grey[600],
+                                      ),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            )
+                          else
+                            Column(
+                              children: [
+                                ..._recommendedProducts.map((product) {
+                                  return Container(
+                                    margin: const EdgeInsets.only(bottom: 8), // COMPACT MARGIN
+                                    padding: const EdgeInsets.all(10), // COMPACT PADDING
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey[50],
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(
+                                        color: Colors.grey[200]!,
+                                        width: 1,
+                                      ),
+                                    ),
+                                    child: InkWell(
+                                      onTap: () {
+                                        Navigator.pushNamed(
+                                          context,
+                                          '/productDetail',
+                                          arguments: {'id': product['id']},
+                                        );
+                                      },
+                                      borderRadius: BorderRadius.circular(10),
+                                      child: Row(
+                                        children: [
+                                          _buildProductImage(product['image_url']),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  product['name'],
+                                                  style: GoogleFonts.poppins(
+                                                    fontWeight: FontWeight.w600,
+                                                    fontSize: 12, // COMPACT FONT
+                                                    color: Colors.grey[800],
+                                                  ),
+                                                  maxLines: 2,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                                const SizedBox(height: 3),
+                                                Text(
+                                                  product['description'],
+                                                  style: GoogleFonts.poppins(
+                                                    fontSize: 10, // COMPACT FONT
+                                                    color: Colors.grey[600],
+                                                  ),
+                                                  maxLines: 2,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                                const SizedBox(height: 6),
+                                                Text(
+                                                  'Rp ${_formatPrice(product['price'].toDouble())}',
+                                                  style: GoogleFonts.poppins(
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 12, // COMPACT FONT
+                                                    color: const Color(0xFFEC407A),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                                
+                                const SizedBox(height: 12),
+                                
+                                // View All Products Button - MOBILE OPTIMIZED
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: ElevatedButton(
+                                    onPressed: _goToAllProducts,
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFFEC407A),
+                                      padding: const EdgeInsets.symmetric(vertical: 12), // COMPACT PADDING
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      elevation: 2,
+                                    ),
+                                    child: Text(
+                                      'Lihat Semua Produk',
+                                      style: GoogleFonts.poppins(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 14, // COMPACT FONT
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // Action Buttons - MOBILE OPTIMIZED
+                  SlideTransition(
+                    position: _slideAnimation,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              Navigator.pushReplacementNamed(context, '/quiz');
+                            },
+                            icon: const Icon(Icons.refresh, color: Colors.white, size: 18), // COMPACT ICON
+                            label: Text(
+                              'Ulangi Quiz',
+                              style: GoogleFonts.poppins(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 12, // COMPACT FONT
+                              ),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.grey[600],
+                              padding: const EdgeInsets.symmetric(vertical: 12), // COMPACT PADDING
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: _goBackToHome,
+                            icon: const Icon(Icons.home, color: Colors.white, size: 18), // COMPACT ICON
+                            label: Text(
+                              'Beranda',
+                              style: GoogleFonts.poppins(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 12, // COMPACT FONT
+                              ),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFEC407A),
+                              padding: const EdgeInsets.symmetric(vertical: 12), // COMPACT PADDING
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 20), // BOTTOM PADDING FOR MOBILE
+                ],
+              ),
+            ),
     );
   }
 }

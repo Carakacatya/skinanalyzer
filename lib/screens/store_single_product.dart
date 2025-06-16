@@ -9,7 +9,9 @@ import '../providers/auth_provider.dart';
 import '../constants/colors.dart';
 
 class StoreSingleProduct extends StatefulWidget {
-  const StoreSingleProduct({super.key});
+  final int initialCategoryIndex;
+  
+  const StoreSingleProduct({super.key, this.initialCategoryIndex = 0});
 
   @override
   _StoreSingleProductState createState() => _StoreSingleProductState();
@@ -21,7 +23,6 @@ class _StoreSingleProductState extends State<StoreSingleProduct>
   List<Map<String, dynamic>> _products = [];
   List<Map<String, dynamic>> _filteredProducts = [];
   List<Map<String, dynamic>> _searchResults = [];
-  List<Map<String, dynamic>> _recommendedProducts = [];
   bool _isLoading = true;
   bool _isSearching = false;
   bool _isListening = false;
@@ -50,6 +51,7 @@ class _StoreSingleProductState extends State<StoreSingleProduct>
   void initState() {
     super.initState();
     _speech = stt.SpeechToText();
+    _selectedCategoryIndex = widget.initialCategoryIndex;
     
     // Initialize Animation Controllers
     _fadeController = AnimationController(
@@ -189,7 +191,6 @@ class _StoreSingleProductState extends State<StoreSingleProduct>
     
     await _fetchProducts();
     await _fetchUserLikedProducts();
-    _prepareRecommendedProducts();
     _filterProductsByCategory();
   }
   
@@ -217,20 +218,6 @@ class _StoreSingleProductState extends State<StoreSingleProduct>
       await authProvider.pb.collection('users').update(userId, body: updateData);
     } catch (e) {
       debugPrint('Error saving skin type to profile: $e');
-    }
-  }
-  
-  void _prepareRecommendedProducts() {
-    if (_products.length > 5) {
-      final recommended = List<Map<String, dynamic>>.from(_products);
-      recommended.shuffle();
-      setState(() {
-        _recommendedProducts = recommended.take(5).toList();
-      });
-    } else {
-      setState(() {
-        _recommendedProducts = _products;
-      });
     }
   }
   
@@ -267,6 +254,7 @@ class _StoreSingleProductState extends State<StoreSingleProduct>
           'description': record.data['description'] ?? '',
           'rating': record.data['rating'] ?? 0,
           'skin_type': skinType ?? [],
+          'brand': record.data['brand'] ?? '',
           'likes_count': 0,
           'is_new': isNewProduct,
           'is_liked_by_user': false,
@@ -385,7 +373,6 @@ class _StoreSingleProductState extends State<StoreSingleProduct>
   }
   
   Future<void> _toggleLikeProduct(String productId) async {
-    // Start pulse animation for feedback
     _pulseController.forward().then((_) {
       _pulseController.reverse();
     });
@@ -405,7 +392,6 @@ class _StoreSingleProductState extends State<StoreSingleProduct>
       
       if (userIdentifier == null) return;
       
-      // Optimistic update with animation
       setState(() {
         if (isCurrentlyLiked) {
           _likedProducts.remove(productId);
@@ -453,7 +439,6 @@ class _StoreSingleProductState extends State<StoreSingleProduct>
             }
           }
         } catch (e) {
-          // Revert optimistic update
           setState(() {
             _likedProducts[productId] = true;
             _likesCount[productId] = (_likesCount[productId] ?? 0) + 1;
@@ -469,7 +454,6 @@ class _StoreSingleProductState extends State<StoreSingleProduct>
             },
           );
         } catch (e) {
-          // Revert optimistic update
           setState(() {
             _likedProducts.remove(productId);
             _likesCount[productId] = (_likesCount[productId] ?? 1) - 1;
@@ -494,9 +478,6 @@ class _StoreSingleProductState extends State<StoreSingleProduct>
     switch (category) {
       case 'New Products':
         filtered = _products.where((product) => product['is_new'] == true).toList();
-        if (filtered.length > 4) {
-          filtered = filtered.sublist(0, 4);
-        }
         break;
         
       case 'For Your Skin':
@@ -637,12 +618,29 @@ class _StoreSingleProductState extends State<StoreSingleProduct>
   }
 
   void _addToCart(Map<String, dynamic> product, BuildContext context) {
-    // Add scale animation for button feedback
-    _scaleController.reset();
-    _scaleController.forward();
-    
-    Provider.of<CartProvider>(context, listen: false).addToCart(product);
-    _showSnackBar('${product['name']} added to cart!', AppColors.primary);
+    try {
+      _scaleController.reset();
+      _scaleController.forward();
+      
+      final cartProduct = {
+        'id': product['id'],
+        'name': product['name'] ?? 'Unknown Product',
+        'price': product['price'] ?? 0,
+        'image_url': product['image_url'] ?? '',
+        'description': product['description'] ?? '',
+        'brand': product['brand'] ?? '',
+        'quantity': 1,
+      };
+      
+      final cartProvider = Provider.of<CartProvider>(context, listen: false);
+      cartProvider.addToCart(cartProduct);
+      
+      _showSnackBar('${cartProduct['name']} added to cart!', const Color(0xFFEC407A));
+      
+    } catch (e) {
+      debugPrint('Error adding to cart: $e');
+      _showSnackBar('Failed to add product to cart', Colors.red);
+    }
   }
   
   void _showSnackBar(String message, Color backgroundColor) {
@@ -657,6 +655,7 @@ class _StoreSingleProductState extends State<StoreSingleProduct>
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
         ),
+        duration: const Duration(seconds: 2),
       ),
     );
   }
@@ -705,214 +704,127 @@ class _StoreSingleProductState extends State<StoreSingleProduct>
     }
   }
   
-  Widget _buildProductImage(String? imageUrl) {
-    if (imageUrl == null || imageUrl.isEmpty) {
-      return Container(
-        width: double.infinity,
-        height: 100,
-        decoration: BoxDecoration(
-          color: Colors.grey[200],
-          borderRadius: BorderRadius.circular(8),
+Widget _buildProductImage(String? imageUrl) {
+  if (imageUrl == null || imageUrl.isEmpty) {
+    return Container(
+      width: double.infinity,
+      height: double.infinity,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.grey[100]!,
+            Colors.grey[50]!,
+          ],
         ),
-        child: const Icon(
-          Icons.image_not_supported,
-          size: 50,
-          color: Colors.grey,
-        ),
-      );
-    }
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: Image.network(
-        imageUrl,
-        width: double.infinity,
-        height: 100,
-        fit: BoxFit.cover,
-        loadingBuilder: (context, child, loadingProgress) {
-          if (loadingProgress == null) return child;
-          
-          // Custom loading animation instead of CircularProgressIndicator
-          return Container(
-            width: double.infinity,
-            height: 100,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Colors.grey[200]!,
-                  Colors.grey[100]!,
-                  Colors.grey[200]!,
-                ],
-                stops: const [0.0, 0.5, 1.0],
-              ),
-            ),
-            child: Stack(
-              children: [
-                // Shimmer effect
-                AnimatedBuilder(
-                  animation: _fadeController,
-                  builder: (context, child) {
-                    return Positioned(
-                      left: -100 + (_fadeController.value * 200),
-                      top: 0,
-                      bottom: 0,
-                      width: 100,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.centerLeft,
-                            end: Alignment.centerRight,
-                            colors: [
-                              Colors.transparent,
-                              Colors.white.withOpacity(0.4),
-                              Colors.transparent,
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-                // Loading icon
-                Center(
-                  child: AnimatedBuilder(
-                    animation: _pulseAnimation,
-                    builder: (context, child) {
-                      return Transform.scale(
-                        scale: _pulseAnimation.value,
-                        child: Icon(
-                          Icons.image,
-                          size: 30,
-                          color: Colors.grey[400],
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-        errorBuilder: (context, error, stackTrace) {
-          return Container(
-            width: double.infinity,
-            height: 100,
-            decoration: BoxDecoration(
-              color: Colors.grey[200],
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Icon(
-              Icons.broken_image,
-              size: 50,
-              color: Colors.grey,
-            ),
-          );
-        },
+      ),
+      child: const Icon(
+        Icons.image_not_supported,
+        size: 28,
+        color: Colors.grey,
       ),
     );
   }
+
+  return ClipRRect(
+    borderRadius: BorderRadius.circular(16),
+    child: Image.network(
+      imageUrl,
+      width: double.infinity,
+      height: double.infinity,
+      fit: BoxFit.cover,
+      loadingBuilder: (context, child, loadingProgress) {
+        if (loadingProgress == null) return child;
+        
+        return Container(
+          width: double.infinity,
+          height: double.infinity,
+          decoration: BoxDecoration(
+            color: Colors.grey[200],
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Center(
+            child: CircularProgressIndicator(
+              color: const Color(0xFFEC407A),
+              strokeWidth: 2,
+              value: loadingProgress.expectedTotalBytes != null
+                  ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                  : null,
+            ),
+          ),
+        );
+      },
+      errorBuilder: (context, error, stackTrace) {
+        return Container(
+          width: double.infinity,
+          height: double.infinity,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Colors.grey[100]!,
+                Colors.grey[50]!,
+              ],
+            ),
+          ),
+          child: const Icon(
+            Icons.broken_image,
+            size: 28,
+            color: Colors.grey,
+          ),
+        );
+      },
+    ),
+  );
+}
 
   Widget _buildLoadingState() {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // Custom loading animation
-          AnimatedBuilder(
-            animation: _pulseController,
-            builder: (context, child) {
-              return Transform.scale(
-                scale: _pulseAnimation.value,
-                child: Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        const Color(0xFFF48FB1),
-                        const Color(0xFFEC407A),
-                      ],
-                    ),
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFFEC407A).withOpacity(0.3),
-                        blurRadius: 20,
-                        spreadRadius: 5,
-                      ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.shopping_bag,
-                    color: Colors.white,
-                    size: 40,
-                  ),
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 24),
-          FadeTransition(
-            opacity: _fadeAnimation,
-            child: Text(
-              'Loading amazing products...',
-              style: GoogleFonts.poppins(
-                color: Colors.grey[700],
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
+          Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  const Color(0xFFF48FB1),
+                  const Color(0xFFEC407A),
+                ],
               ),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.shopping_bag,
+              color: Colors.white,
+              size: 30,
             ),
           ),
-          const SizedBox(height: 12),
-          SlideTransition(
-            position: _slideAnimation,
-            child: Container(
-              width: 200,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.grey[200],
-                borderRadius: BorderRadius.circular(2),
-              ),
-              child: AnimatedBuilder(
-                animation: _fadeController,
-                builder: (context, child) {
-                  return FractionallySizedBox(
-                    alignment: Alignment.centerLeft,
-                    widthFactor: _fadeController.value,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            const Color(0xFFF48FB1),
-                            const Color(0xFFEC407A),
-                          ],
-                        ),
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  );
-                },
-              ),
+          const SizedBox(height: 16),
+          Text(
+            'Memuat produk...',
+            style: GoogleFonts.poppins(
+              fontSize: 16,
+              color: Colors.grey[700],
             ),
+            textAlign: TextAlign.center,
           ),
         ],
       ),
     );
   }
 
+  String _formatPrice(double price) {
+    return price.toStringAsFixed(0);
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Start pulse animation for loading
-    if (_isLoading) {
-      _pulseController.repeat(reverse: true);
-    } else {
-      _pulseController.stop();
-    }
-    
     final displayProducts = _isSearching ? _searchResults : _filteredProducts;
     
     return Scaffold(
@@ -924,30 +836,59 @@ class _StoreSingleProductState extends State<StoreSingleProduct>
             style: GoogleFonts.poppins(
               fontWeight: FontWeight.w600,
               fontSize: 20,
+              color: Colors.white,
             ),
           ),
         ),
         backgroundColor: const Color(0xFFF8BBD0),
         centerTitle: true,
+        automaticallyImplyLeading: false, // REMOVED BACK BUTTON
         actions: [
-          ScaleTransition(
-            scale: _scaleAnimation,
-            child: IconButton(
-              icon: const Icon(Icons.shopping_cart),
-              onPressed: () {
-                Navigator.pushNamed(context, '/cart');
-              },
-            ),
+          Consumer<CartProvider>(
+            builder: (context, cartProvider, child) {
+              return Stack(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.shopping_cart, color: Colors.white),
+                    onPressed: () => Navigator.pushNamed(context, '/cart'),
+                  ),
+                  if (cartProvider.items.isNotEmpty)
+                    Positioned(
+                      right: 8,
+                      top: 8,
+                      child: Container(
+                        padding: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        constraints: const BoxConstraints(
+                          minWidth: 16,
+                          minHeight: 16,
+                        ),
+                        child: Text(
+                          '${cartProvider.items.length}',
+                          style: GoogleFonts.poppins(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
         ],
       ),
       backgroundColor: const Color(0xFFFCE4EC),
-      body: _isLoading
-          ? _buildLoadingState()
-          : _errorMessage != null
-              ? FadeTransition(
-                  opacity: _fadeAnimation,
-                  child: Center(
+      body: SafeArea(
+        child: _isLoading
+            ? _buildLoadingState()
+            : _errorMessage != null
+                ? Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -966,702 +907,339 @@ class _StoreSingleProductState extends State<StoreSingleProduct>
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 16),
-                        ScaleTransition(
-                          scale: _scaleAnimation,
-                          child: ElevatedButton(
-                            onPressed: _fetchProducts,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFF48FB1),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
+                        ElevatedButton(
+                          onPressed: _fetchProducts,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFEC407A),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
                             ),
-                            child: Text(
-                              'Try Again',
-                              style: GoogleFonts.poppins(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w500,
-                              ),
+                          ),
+                          child: Text(
+                            'Try Again',
+                            style: GoogleFonts.poppins(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w500,
                             ),
                           ),
                         ),
                       ],
                     ),
-                  ),
-                )
-              : FadeTransition(
-                  opacity: _fadeAnimation,
-                  child: Padding(
-                    padding: EdgeInsets.only(
-                      left: 12,
-                      right: 12,
-                      top: 12,
-                      bottom: MediaQuery.of(context).padding.bottom + 12,
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Search Bar with animation
-                        SlideTransition(
-                          position: _slideAnimation,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(16),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.05),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
+                  )
+                : Column(
+                    children: [
+                      // Search Bar
+                      Container(
+                        margin: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.05),
+                              blurRadius: 10,
+                              offset: const Offset(0, 2),
                             ),
-                            child: TextField(
-                              controller: _searchController,
-                              style: GoogleFonts.poppins(fontSize: 14),
-                              decoration: InputDecoration(
-                                hintText: 'Search any Product...',
-                                hintStyle: GoogleFonts.poppins(
-                                  color: Colors.grey[400],
-                                  fontSize: 14,
-                                ),
-                                prefixIcon: const Icon(Icons.search, color: Colors.grey),
-                                suffixIcon: AnimatedBuilder(
-                                  animation: _pulseAnimation,
-                                  builder: (context, child) {
-                                    return Transform.scale(
-                                      scale: _isListening ? _pulseAnimation.value : 1.0,
-                                      child: GestureDetector(
-                                        onTap: _listen,
-                                        child: Icon(
-                                          _isListening ? Icons.mic : Icons.mic_none,
-                                          color: _isListening ? Colors.red : Colors.grey,
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                  borderSide: BorderSide.none,
-                                ),
-                                filled: true,
-                                fillColor: Colors.white,
-                                contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                  borderSide: BorderSide(color: Colors.grey.shade200, width: 0.5),
-                                ),
+                          ],
+                        ),
+                        child: TextField(
+                          controller: _searchController,
+                          style: GoogleFonts.poppins(fontSize: 14),
+                          decoration: InputDecoration(
+                            hintText: 'Search any Product..',
+                            hintStyle: GoogleFonts.poppins(
+                              color: Colors.grey[400],
+                              fontSize: 14,
+                            ),
+                            prefixIcon: const Icon(Icons.search, color: Color(0xFFEC407A)),
+                            suffixIcon: GestureDetector(
+                              onTap: _listen,
+                              child: Icon(
+                                _isListening ? Icons.mic : Icons.mic_none,
+                                color: _isListening ? Colors.red : Colors.grey,
                               ),
                             ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(16),
+                              borderSide: BorderSide.none,
+                            ),
+                            filled: true,
+                            fillColor: Colors.white,
+                            contentPadding: const EdgeInsets.symmetric(vertical: 12),
                           ),
                         ),
-                        const SizedBox(height: 16),
+                      ),
 
-                        // Category Tabs with animation
-                        if (!_isSearching)
-                          SlideTransition(
-                            position: _slideAnimation,
-                            child: Container(
-                              height: 40,
-                              alignment: Alignment.centerLeft,
-                              child: SingleChildScrollView(
-                                controller: _tabScrollController,
-                                scrollDirection: Axis.horizontal,
-                                child: Row(
-                                  children: List.generate(_categories.length, (index) {
-                                    return GestureDetector(
-                                      onTap: () {
-                                        setState(() {
-                                          _selectedCategoryIndex = index;
-                                          _filterProductsByCategory();
-                                        });
-                                      },
-                                      child: AnimatedContainer(
-                                        duration: const Duration(milliseconds: 300),
-                                        margin: const EdgeInsets.only(right: 16),
+                      // Category Tabs
+                      if (!_isSearching)
+                        Container(
+                          height: 40,
+                          margin: const EdgeInsets.symmetric(horizontal: 12),
+                          child: ListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: _categories.length,
+                            itemBuilder: (context, index) {
+                              final category = _categories[index];
+                              final isSelected = index == _selectedCategoryIndex;
+                              
+                              return GestureDetector(
+                                onTap: () {
+                                  setState(() {
+                                    _selectedCategoryIndex = index;
+                                    _filterProductsByCategory();
+                                  });
+                                },
+                                child: Container(
+                                  margin: const EdgeInsets.only(right: 8),
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: isSelected ? const Color(0xFFEC407A) : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(
+                                      color: isSelected ? const Color(0xFFEC407A) : Colors.grey.shade300,
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: Text(
+                                    category,
+                                    style: GoogleFonts.poppins(
+                                      color: isSelected ? Colors.white : Colors.grey[700],
+                                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+
+                      const SizedBox(height: 16),
+
+                      // Products Grid - IMPROVED MOBILE LAYOUT
+                      Expanded(
+                        child: displayProducts.isEmpty
+                            ? Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.inventory_2_outlined,
+                                      size: 64,
+                                      color: Colors.grey[400],
+                                    ),
+                                    const SizedBox(height: 16),
+                                    Text(
+                                      _isSearching
+                                          ? 'No products match your search'
+                                          : _selectedCategoryIndex == 1 && _skinType == null
+                                              ? 'Please take the quiz to determine your skin type'
+                                              : _selectedCategoryIndex == 1
+                                                  ? 'No products found for your skin type ($_skinType)'
+                                                  : _selectedCategoryIndex == 2
+                                                      ? 'You haven\'t liked any products yet'
+                                                      : 'No products available',
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 14,
+                                        color: Colors.grey[600],
+                                      ),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : RefreshIndicator(
+                                onRefresh: () async {
+                                  await _fetchProducts();
+                                  await _fetchUserLikedProducts();
+                                  _filterProductsByCategory();
+                                },
+                                color: const Color(0xFFEC407A),
+                                child: GridView.builder(
+                                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 100), // ADDED BOTTOM PADDING FOR NAVIGATION
+                                  itemCount: displayProducts.length,
+                                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                                    crossAxisCount: 2,
+                                    mainAxisSpacing: 12, // COMPACT SPACING
+                                    crossAxisSpacing: 12, // COMPACT SPACING
+                                    childAspectRatio: 0.72, // OPTIMIZED FOR MOBILE
+                                  ),
+                                  itemBuilder: (context, index) {
+                                    final product = displayProducts[index];
+                                    final productId = product['id'];
+                                    final isLiked = _likedProducts[productId] ?? false;
+                                    
+                                    return Container(
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(16), // COMPACT RADIUS
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withOpacity(0.06),
+                                            blurRadius: 8,
+                                            offset: const Offset(0, 2),
+                                            spreadRadius: 0,
+                                          ),
+                                        ],
+                                      ),
+                                      child: InkWell(
+                                        onTap: () {
+                                          Navigator.pushNamed(
+                                            context,
+                                            '/productDetail',
+                                            arguments: {'id': product['id']},
+                                          );
+                                        },
+                                        borderRadius: BorderRadius.circular(16),
                                         child: Column(
-                                          mainAxisSize: MainAxisSize.min,
+                                          crossAxisAlignment: CrossAxisAlignment.start,
                                           children: [
-                                            Text(
-                                              _categories[index],
-                                              style: GoogleFonts.poppins(
-                                                fontSize: 14,
-                                                fontWeight: _selectedCategoryIndex == index
-                                                    ? FontWeight.w600
-                                                    : FontWeight.w400,
-                                                color: _selectedCategoryIndex == index
-                                                    ? const Color(0xFFEC407A)
-                                                    : Colors.grey[600],
+                                            // Product Image Section - COMPACT
+                                            Expanded(
+                                              flex: 3,
+                                              child: Container(
+                                                margin: const EdgeInsets.all(8), // COMPACT MARGIN
+                                                child: Stack(
+                                                  children: [
+                                                    Container(
+                                                      width: double.infinity,
+                                                      height: double.infinity,
+                                                      child: _buildProductImage(product['image_url']),
+                                                    ),
+                                                    // Like Button - COMPACT
+                                                    Positioned(
+                                                      top: 6,
+                                                      right: 6,
+                                                      child: GestureDetector(
+                                                        onTap: () => _toggleLikeProduct(productId),
+                                                        child: Container(
+                                                          padding: const EdgeInsets.all(4),
+                                                          decoration: BoxDecoration(
+                                                            color: Colors.white,
+                                                            shape: BoxShape.circle,
+                                                            boxShadow: [
+                                                              BoxShadow(
+                                                                color: Colors.black.withOpacity(0.1),
+                                                                blurRadius: 4,
+                                                                offset: const Offset(0, 1),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                          child: Icon(
+                                                            isLiked ? Icons.favorite : Icons.favorite_border,
+                                                            color: const Color(0xFFEC407A),
+                                                            size: 16, // COMPACT SIZE
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    // NEW Badge - COMPACT
+                                                    if (product['is_new'] == true)
+                                                      Positioned(
+                                                        top: 6,
+                                                        left: 6,
+                                                        child: Container(
+                                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                          decoration: BoxDecoration(
+                                                            color: const Color(0xFF4CAF50),
+                                                            borderRadius: BorderRadius.circular(8),
+                                                          ),
+                                                          child: Text(
+                                                            'NEW',
+                                                            style: GoogleFonts.poppins(
+                                                              color: Colors.white,
+                                                              fontSize: 7,
+                                                              fontWeight: FontWeight.w700,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                  ],
+                                                ),
                                               ),
                                             ),
-                                            AnimatedContainer(
-                                              duration: const Duration(milliseconds: 300),
-                                              margin: const EdgeInsets.only(top: 4),
-                                              height: 2,
-                                              width: _selectedCategoryIndex == index ? 40 : 0,
-                                              decoration: BoxDecoration(
-                                                color: const Color(0xFFEC407A),
-                                                borderRadius: BorderRadius.circular(2),
+                                            // Product Info Section - COMPACT MOBILE LAYOUT
+                                            Expanded(
+                                              flex: 2,
+                                              child: Padding(
+                                                padding: const EdgeInsets.fromLTRB(8, 0, 8, 8), // COMPACT PADDING
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    // Product Name - COMPACT
+                                                    Text(
+                                                      product['name'],
+                                                      style: GoogleFonts.poppins(
+                                                        fontWeight: FontWeight.w600,
+                                                        fontSize: 11, // COMPACT FONT
+                                                        color: Colors.grey[800],
+                                                        height: 1.2,
+                                                      ),
+                                                      maxLines: 2,
+                                                      overflow: TextOverflow.ellipsis,
+                                                    ),
+                                                    const SizedBox(height: 2), // MINIMAL SPACING
+                                                    // Product Description - COMPACT
+                                                    Text(
+                                                      product['description'],
+                                                      style: GoogleFonts.poppins(
+                                                        fontSize: 8, // COMPACT FONT
+                                                        color: Colors.grey[600],
+                                                        height: 1.2,
+                                                      ),
+                                                      maxLines: 1,
+                                                      overflow: TextOverflow.ellipsis,
+                                                    ),
+                                                    const Spacer(), // Push price and button to bottom
+                                                    // Price - COMPACT
+                                                    Text(
+                                                      'Rp ${_formatPrice(product['price'].toDouble())}',
+                                                      style: GoogleFonts.poppins(
+                                                        fontWeight: FontWeight.bold,
+                                                        fontSize: 12, // COMPACT FONT
+                                                        color: const Color(0xFFEC407A),
+                                                      ),
+                                                    ),
+                                                    const SizedBox(height: 4), // MINIMAL SPACING
+                                                    // Add to Cart Button - COMPACT MOBILE
+                                                    SizedBox(
+                                                      width: double.infinity,
+                                                      height: 28, // COMPACT HEIGHT
+                                                      child: ElevatedButton(
+                                                        onPressed: () => _addToCart(product, context),
+                                                        style: ElevatedButton.styleFrom(
+                                                          backgroundColor: const Color(0xFFEC407A),
+                                                          foregroundColor: Colors.white,
+                                                          shape: RoundedRectangleBorder(
+                                                            borderRadius: BorderRadius.circular(8), // COMPACT RADIUS
+                                                          ),
+                                                          padding: EdgeInsets.zero,
+                                                          elevation: 1, // MINIMAL ELEVATION
+                                                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                        ),
+                                                        child: Text(
+                                                          'Add to Cart',
+                                                          style: GoogleFonts.poppins(
+                                                            fontSize: 8, // COMPACT FONT
+                                                            fontWeight: FontWeight.w600,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
                                               ),
                                             ),
                                           ],
                                         ),
                                       ),
                                     );
-                                  }),
+                                  },
                                 ),
                               ),
-                            ),
-                          ),
-                        const SizedBox(height: 16),
-
-                        // Info indicators with animation
-                        if (!_isSearching && _selectedCategoryIndex == 1 && _skinType != null)
-                          ScaleTransition(
-                            scale: _scaleAnimation,
-                            child: Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(12),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.05),
-                                      blurRadius: 5,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: Row(
-                                  children: [
-                                    const Icon(Icons.face, color: Color(0xFFEC407A)),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      'Your skin type: $_skinType',
-                                      style: GoogleFonts.poppins(
-                                        fontWeight: FontWeight.w500,
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-
-                        if (!_isSearching && _selectedCategoryIndex == 2)
-                          ScaleTransition(
-                            scale: _scaleAnimation,
-                            child: Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(12),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.05),
-                                      blurRadius: 5,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: Row(
-                                  children: [
-                                    const Icon(Icons.favorite, color: Color(0xFFEC407A)),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      'Your liked products',
-                                      style: GoogleFonts.poppins(
-                                        fontWeight: FontWeight.w500,
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-
-                        if (_isSearching)
-                          FadeTransition(
-                            opacity: _fadeAnimation,
-                            child: Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: Text(
-                                'Search results: ${_searchResults.length} products',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ),
-                          ),
-
-                        // Products Grid with staggered animation
-                        Expanded(
-                          child: RefreshIndicator(
-                            onRefresh: () async {
-                              await _fetchProducts();
-                              await _fetchUserLikedProducts();
-                              _filterProductsByCategory();
-                            },
-                            color: const Color(0xFFEC407A),
-                            child: SingleChildScrollView(
-                              physics: const AlwaysScrollableScrollPhysics(),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  displayProducts.isEmpty
-                                      ? FadeTransition(
-                                          opacity: _fadeAnimation,
-                                          child: Center(
-                                            child: Column(
-                                              mainAxisAlignment: MainAxisAlignment.center,
-                                              children: [
-                                                const SizedBox(height: 40),
-                                                ScaleTransition(
-                                                  scale: _scaleAnimation,
-                                                  child: const Icon(
-                                                    Icons.inventory_2_outlined,
-                                                    size: 64,
-                                                    color: Colors.grey,
-                                                  ),
-                                                ),
-                                                const SizedBox(height: 16),
-                                                Text(
-                                                  _isSearching
-                                                      ? 'No products match your search'
-                                                      : _selectedCategoryIndex == 1 && _skinType == null
-                                                          ? 'Please take the quiz to determine your skin type'
-                                                          : _selectedCategoryIndex == 1
-                                                              ? 'No products found for your skin type ($_skinType)'
-                                                              : _selectedCategoryIndex == 2
-                                                                  ? 'You haven\'t liked any products yet'
-                                                                  : 'No products in ${_categories[_selectedCategoryIndex]} category',
-                                                  style: GoogleFonts.poppins(
-                                                    fontSize: 14,
-                                                    color: Colors.grey[600],
-                                                  ),
-                                                  textAlign: TextAlign.center,
-                                                ),
-                                                if (_selectedCategoryIndex == 1 && _skinType == null)
-                                                  Padding(
-                                                    padding: const EdgeInsets.only(top: 16),
-                                                    child: ScaleTransition(
-                                                      scale: _scaleAnimation,
-                                                      child: ElevatedButton(
-                                                        onPressed: () {
-                                                          Navigator.pushNamed(context, '/quiz');
-                                                        },
-                                                        style: ElevatedButton.styleFrom(
-                                                          backgroundColor: const Color(0xFFEC407A),
-                                                          shape: RoundedRectangleBorder(
-                                                            borderRadius: BorderRadius.circular(12),
-                                                          ),
-                                                        ),
-                                                        child: Text(
-                                                          'Start Quiz',
-                                                          style: GoogleFonts.poppins(
-                                                            color: Colors.white,
-                                                            fontWeight: FontWeight.w500,
-                                                          ),
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  ),
-                                                const SizedBox(height: 40),
-                                              ],
-                                            ),
-                                          ),
-                                        )
-                                      : GridView.builder(
-                                          shrinkWrap: true,
-                                          physics: const NeverScrollableScrollPhysics(),
-                                          padding: const EdgeInsets.only(bottom: 16),
-                                          itemCount: displayProducts.length,
-                                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                                            crossAxisCount: 2,
-                                            mainAxisSpacing: 12,
-                                            crossAxisSpacing: 12,
-                                            childAspectRatio: 0.65,
-                                          ),
-                                          itemBuilder: (context, index) {
-                                            final product = displayProducts[index];
-                                            final productId = product['id'];
-                                            final isLiked = _likedProducts[productId] ?? false;
-                                            
-                                            // Staggered animation for grid items
-                                            return AnimatedBuilder(
-                                              animation: _slideController,
-                                              builder: (context, child) {
-                                                final delay = index * 0.1;
-                                                final animationValue = Curves.easeOutCubic.transform(
-                                                  (_slideController.value - delay).clamp(0.0, 1.0)
-                                                );
-                                                
-                                                return Transform.translate(
-                                                  offset: Offset(0, 50 * (1 - animationValue)),
-                                                  child: Opacity(
-                                                    opacity: animationValue,
-                                                    child: Card(
-                                                      elevation: 2,
-                                                      shadowColor: Colors.black.withOpacity(0.1),
-                                                      shape: RoundedRectangleBorder(
-                                                        borderRadius: BorderRadius.circular(16)
-                                                      ),
-                                                      child: Column(
-                                                        children: [
-                                                          Stack(
-                                                            children: [
-                                                              ClipRRect(
-                                                                borderRadius: const BorderRadius.vertical(
-                                                                  top: Radius.circular(16)
-                                                                ),
-                                                                child: _buildProductImage(product['image_url']),
-                                                              ),
-                                                              Positioned(
-                                                                top: 8,
-                                                                right: 8,
-                                                                child: AnimatedBuilder(
-                                                                  animation: _pulseAnimation,
-                                                                  builder: (context, child) {
-                                                                    return GestureDetector(
-                                                                      onTap: () => _toggleLikeProduct(productId),
-                                                                      child: Container(
-                                                                        padding: const EdgeInsets.all(4),
-                                                                        decoration: BoxDecoration(
-                                                                          color: Colors.white.withOpacity(0.8),
-                                                                          shape: BoxShape.circle,
-                                                                          boxShadow: [
-                                                                            BoxShadow(
-                                                                              color: Colors.black.withOpacity(0.1),
-                                                                              blurRadius: 3,
-                                                                              offset: const Offset(0, 1),
-                                                                            ),
-                                                                          ],
-                                                                        ),
-                                                                        child: Icon(
-                                                                          isLiked ? Icons.favorite : Icons.favorite_border,
-                                                                          color: const Color(0xFFEC407A),
-                                                                          size: 18,
-                                                                        ),
-                                                                      ),
-                                                                    );
-                                                                  },
-                                                                ),
-                                                              ),
-                                                              if (product['likes_count'] > 0)
-                                                                Positioned(
-                                                                  top: 8,
-                                                                  left: 8,
-                                                                  child: Container(
-                                                                    padding: const EdgeInsets.symmetric(
-                                                                      horizontal: 6, 
-                                                                      vertical: 2
-                                                                    ),
-                                                                    decoration: BoxDecoration(
-                                                                      color: Colors.black.withOpacity(0.6),
-                                                                      borderRadius: BorderRadius.circular(12),
-                                                                    ),
-                                                                    child: Row(
-                                                                      mainAxisSize: MainAxisSize.min,
-                                                                      children: [
-                                                                        const Icon(
-                                                                          Icons.favorite,
-                                                                          color: Colors.white,
-                                                                          size: 12,
-                                                                        ),
-                                                                        const SizedBox(width: 2),
-                                                                        Text(
-                                                                          '${product['likes_count']}',
-                                                                          style: GoogleFonts.poppins(
-                                                                            color: Colors.white,
-                                                                            fontSize: 10,
-                                                                          ),
-                                                                        ),
-                                                                      ],
-                                                                    ),
-                                                                  ),
-                                                                ),
-                                                              if (product['is_new'] == true)
-                                                                Positioned(
-                                                                  bottom: 0,
-                                                                  right: 0,
-                                                                  child: Container(
-                                                                    padding: const EdgeInsets.symmetric(
-                                                                      horizontal: 8, 
-                                                                      vertical: 4
-                                                                    ),
-                                                                    decoration: const BoxDecoration(
-                                                                      color: Color(0xFF4CAF50),
-                                                                      borderRadius: BorderRadius.only(
-                                                                        topLeft: Radius.circular(12),
-                                                                        bottomRight: Radius.circular(16),
-                                                                      ),
-                                                                    ),
-                                                                    child: Text(
-                                                                      'NEW',
-                                                                      style: GoogleFonts.poppins(
-                                                                        color: Colors.white,
-                                                                        fontSize: 10,
-                                                                        fontWeight: FontWeight.w600,
-                                                                      ),
-                                                                    ),
-                                                                  ),
-                                                                ),
-                                                              if (!_isSearching && _selectedCategoryIndex == 1)
-                                                                Positioned(
-                                                                  bottom: 0,
-                                                                  left: 0,
-                                                                  child: Container(
-                                                                    padding: const EdgeInsets.symmetric(
-                                                                      horizontal: 8, 
-                                                                      vertical: 4
-                                                                    ),
-                                                                    decoration: const BoxDecoration(
-                                                                      color: Color(0xFFEC407A),
-                                                                      borderRadius: BorderRadius.only(
-                                                                        topRight: Radius.circular(12),
-                                                                        bottomLeft: Radius.circular(16),
-                                                                      ),
-                                                                    ),
-                                                                    child: Text(
-                                                                      'RECOMMENDED',
-                                                                      style: GoogleFonts.poppins(
-                                                                        color: Colors.white,
-                                                                        fontSize: 8,
-                                                                        fontWeight: FontWeight.w600,
-                                                                      ),
-                                                                    ),
-                                                                  ),
-                                                                ),
-                                                            ],
-                                                          ),
-                                                          Expanded(
-                                                            child: Padding(
-                                                              padding: const EdgeInsets.all(8),
-                                                              child: Column(
-                                                                crossAxisAlignment: CrossAxisAlignment.start,
-                                                                children: [
-                                                                  Text(
-                                                                    product['name'],
-                                                                    style: GoogleFonts.poppins(
-                                                                      fontWeight: FontWeight.w600,
-                                                                      fontSize: 12,
-                                                                    ),
-                                                                    maxLines: 2,
-                                                                    overflow: TextOverflow.ellipsis,
-                                                                  ),
-                                                                  const SizedBox(height: 2),
-                                                                  Text(
-                                                                    product['description'],
-                                                                    style: GoogleFonts.poppins(
-                                                                      fontSize: 10,
-                                                                      color: Colors.grey[600],
-                                                                    ),
-                                                                    maxLines: 2,
-                                                                    overflow: TextOverflow.ellipsis,
-                                                                  ),
-                                                                  const SizedBox(height: 4),
-                                                                  Text(
-                                                                    'Rp ${product['price']}',
-                                                                    style: GoogleFonts.poppins(
-                                                                      fontWeight: FontWeight.w600,
-                                                                      fontSize: 12,
-                                                                      color: const Color(0xFFEC407A),
-                                                                    ),
-                                                                  ),
-                                                                  const Spacer(),
-                                                                  SizedBox(
-                                                                    width: double.infinity,
-                                                                    child: AnimatedBuilder(
-                                                                      animation: _scaleAnimation,
-                                                                      builder: (context, child) {
-                                                                        return Transform.scale(
-                                                                          scale: _scaleAnimation.value,
-                                                                          child: ElevatedButton(
-                                                                            onPressed: () => _addToCart(product, context),
-                                                                            style: ElevatedButton.styleFrom(
-                                                                              backgroundColor: const Color(0xFFEC407A),
-                                                                              shape: RoundedRectangleBorder(
-                                                                                borderRadius: BorderRadius.circular(12),
-                                                                              ),
-                                                                              padding: const EdgeInsets.symmetric(vertical: 6),
-                                                                            ),
-                                                                            child: Text(
-                                                                              'Add to Cart',
-                                                                              style: GoogleFonts.poppins(
-                                                                                color: Colors.white,
-                                                                                fontSize: 11,
-                                                                                fontWeight: FontWeight.w500,
-                                                                              ),
-                                                                            ),
-                                                                          ),
-                                                                        );
-                                                                      },
-                                                                    ),
-                                                                  ),
-                                                                ],
-                                                              ),
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                  ),
-                                                );
-                                              },
-                                            );
-                                          },
-                                        ),
-                                  
-                                  // Recommended section with animation
-                                  if (!_isSearching && 
-                                      (_selectedCategoryIndex == 0 || _selectedCategoryIndex == 3) && 
-                                      _recommendedProducts.isNotEmpty) ...[
-                                    const SizedBox(height: 24),
-                                    FadeTransition(
-                                      opacity: _fadeAnimation,
-                                      child: Text(
-                                        'Recommended For You',
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w600,
-                                          color: const Color(0xFF333333),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 12),
-                                    
-                                    ListView.builder(
-                                      itemCount: _recommendedProducts.length > 5 ? 5 : _recommendedProducts.length,
-                                      shrinkWrap: true,
-                                      physics: const NeverScrollableScrollPhysics(),
-                                      itemBuilder: (context, index) {
-                                        final product = _recommendedProducts[index];
-                                        final productId = product['id'];
-                                        final isLiked = _likedProducts[productId] ?? false;
-                                        
-                                        return SlideTransition(
-                                          position: Tween<Offset>(
-                                            begin: Offset(1.0, 0.0),
-                                            end: Offset.zero,
-                                          ).animate(CurvedAnimation(
-                                            parent: _slideController,
-                                            curve: Interval(
-                                              index * 0.1,
-                                              1.0,
-                                              curve: Curves.easeOutCubic,
-                                            ),
-                                          )),
-                                          child: Container(
-                                            margin: const EdgeInsets.only(bottom: 12),
-                                            padding: const EdgeInsets.all(12),
-                                            decoration: BoxDecoration(
-                                              color: Colors.white,
-                                              borderRadius: BorderRadius.circular(16),
-                                              boxShadow: [
-                                                BoxShadow(
-                                                  color: Colors.black.withOpacity(0.05),
-                                                  blurRadius: 5,
-                                                  offset: const Offset(0, 2),
-                                                ),
-                                              ],
-                                            ),
-                                            child: Row(
-                                              children: [
-                                                ClipRRect(
-                                                  borderRadius: BorderRadius.circular(12),
-                                                  child: SizedBox(
-                                                    width: 60,
-                                                    height: 60,
-                                                    child: _buildProductImage(product['image_url']),
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 12),
-                                                Expanded(
-                                                  child: Column(
-                                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                                    children: [
-                                                      Text(
-                                                        product['name'],
-                                                        style: GoogleFonts.poppins(
-                                                          fontWeight: FontWeight.w600,
-                                                          fontSize: 13,
-                                                        ),
-                                                        maxLines: 1,
-                                                        overflow: TextOverflow.ellipsis,
-                                                      ),
-                                                      const SizedBox(height: 2),
-                                                      Text(
-                                                        "50 ml",
-                                                        style: GoogleFonts.poppins(
-                                                          color: Colors.grey[600],
-                                                          fontSize: 11,
-                                                        ),
-                                                      ),
-                                                      Text(
-                                                        'Rp ${product['price']}',
-                                                        style: GoogleFonts.poppins(
-                                                          fontWeight: FontWeight.w600,
-                                                          fontSize: 13,
-                                                          color: const Color(0xFFEC407A),
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
-                                                Column(
-                                                  children: [
-                                                    AnimatedBuilder(
-                                                      animation: _pulseAnimation,
-                                                      builder: (context, child) {
-                                                        return Transform.scale(
-                                                          scale: isLiked ? _pulseAnimation.value : 1.0,
-                                                          child: IconButton(
-                                                            icon: Icon(
-                                                              isLiked ? Icons.favorite : Icons.favorite_border,
-                                                              color: const Color(0xFFEC407A),
-                                                              size: 20,
-                                                            ),
-                                                            onPressed: () => _toggleLikeProduct(productId),
-                                                          ),
-                                                        );
-                                                      },
-                                                    ),
-                                                    ScaleTransition(
-                                                      scale: _scaleAnimation,
-                                                      child: IconButton(
-                                                        icon: const Icon(
-                                                          Icons.shopping_cart_outlined,
-                                                          color: Color(0xFFEC407A),
-                                                          size: 20,
-                                                        ),
-                                                        onPressed: () => _addToCart(product, context),
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                ),
+      ),
     );
   }
 }
