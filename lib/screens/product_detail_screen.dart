@@ -16,10 +16,10 @@ class ProductDetailScreen extends StatefulWidget {
 
 class _ProductDetailScreenState extends State<ProductDetailScreen>
     with TickerProviderStateMixin {
+  // State variables
   int _quantity = 1;
   int _selectedImageIndex = 0;
   int _selectedVariantIndex = 0;
-  bool _isExpanded = false;
   bool _isLoading = true;
   bool _isLiked = false;
   bool _isSubmittingReview = false;
@@ -27,7 +27,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   
   // Product data
   Map<String, dynamic>? _product;
-  List<Map<String, dynamic>> _allImages = []; // Combined images from both tables
+  List<Map<String, dynamic>> _allImages = [];
   List<Map<String, dynamic>> _productVariants = [];
   List<Map<String, dynamic>> _productReviews = [];
   
@@ -37,21 +37,25 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   int _selectedRating = 5;
   bool _showReviewForm = false;
   
-  // Animation Controllers
+  // Animation controllers untuk efek visual yang indah
   late AnimationController _fadeController;
   late AnimationController _slideController;
+  late AnimationController _bounceController;
   late AnimationController _scaleController;
-  late AnimationController _pulseController;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
+  late Animation<double> _bounceAnimation;
   late Animation<double> _scaleAnimation;
-  late Animation<double> _pulseAnimation;
 
   @override
   void initState() {
     super.initState();
-    
-    // Initialize Animation Controllers
+    _initializeAnimations();
+    _loadProductData();
+    _startAnimations();
+  }
+
+  void _initializeAnimations() {
     _fadeController = AnimationController(
       duration: const Duration(milliseconds: 800),
       vsync: this,
@@ -62,54 +66,35 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
       vsync: this,
     );
     
-    _scaleController = AnimationController(
+    _bounceController = AnimationController(
       duration: const Duration(milliseconds: 400),
       vsync: this,
     );
-    
-    _pulseController = AnimationController(
-      duration: const Duration(milliseconds: 1000),
+
+    _scaleController = AnimationController(
+      duration: const Duration(milliseconds: 300),
       vsync: this,
     );
     
-    // Initialize Animations
-    _fadeAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _fadeController,
-      curve: Curves.easeInOut,
-    ));
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _fadeController, curve: Curves.easeOutCubic)
+    );
     
     _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 0.3),
+      begin: const Offset(0, 0.15),
       end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _slideController,
-      curve: Curves.easeOutCubic,
-    ));
+    ).animate(CurvedAnimation(parent: _slideController, curve: Curves.easeOutCubic));
     
-    _scaleAnimation = Tween<double>(
-      begin: 0.8,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _scaleController,
-      curve: Curves.elasticOut,
-    ));
-    
-    _pulseAnimation = Tween<double>(
-      begin: 1.0,
-      end: 1.1,
-    ).animate(CurvedAnimation(
-      parent: _pulseController,
-      curve: Curves.easeInOut,
-    ));
-    
-    _loadProductData();
-    _startEntranceAnimations();
+    _bounceAnimation = Tween<double>(begin: 1.0, end: 1.08).animate(
+      CurvedAnimation(parent: _bounceController, curve: Curves.elasticOut)
+    );
+
+    _scaleAnimation = Tween<double>(begin: 0.8, end: 1.0).animate(
+      CurvedAnimation(parent: _scaleController, curve: Curves.easeOutBack)
+    );
   }
   
-  void _startEntranceAnimations() {
+  void _startAnimations() {
     _fadeController.forward();
     Future.delayed(const Duration(milliseconds: 200), () {
       _slideController.forward();
@@ -123,13 +108,14 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   void dispose() {
     _fadeController.dispose();
     _slideController.dispose();
+    _bounceController.dispose();
     _scaleController.dispose();
-    _pulseController.dispose();
     _reviewTitleController.dispose();
     _reviewCommentController.dispose();
     super.dispose();
   }
 
+  // Fungsi utama untuk memuat semua data produk
   Future<void> _loadProductData() async {
     setState(() {
       _isLoading = true;
@@ -140,99 +126,20 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final pb = authProvider.pb;
 
-      debugPrint('Loading product data for ID: ${widget.productId}');
-
-      // Fetch main product data
-      final productRecord = await pb.collection('products').getOne(widget.productId);
+      // 1. Ambil data produk utama dengan ekspansi skin_type
+      await _loadMainProduct(pb);
       
-      debugPrint('Product loaded: ${productRecord.data}');
-      
-      setState(() {
-        _product = {
-          'id': productRecord.id,
-          'name': productRecord.data['name'] ?? '',
-          'price': productRecord.data['price'] ?? 0,
-          'image_url': productRecord.data['image_url'] ?? '',
-          'description': productRecord.data['description'] ?? '',
-          'rating': productRecord.data['rating'] ?? 0,
-          'skin_type': productRecord.data['skin_type'] ?? [],
-          'brand': productRecord.data['brand'] ?? '',
-        };
-      });
-
-      // FIXED: Combine images from both products table and product_images table
+      // 2. Muat semua gambar dari kedua tabel
       await _loadAllImages(pb);
-
-      // Fetch product variants
-      try {
-        debugPrint('Fetching product variants for product_id: ${widget.productId}');
-        
-        final variantsResult = await pb.collection('product_variants').getList(
-          filter: 'product_id ~ "${widget.productId}"',
-        );
-        
-        debugPrint('Variants found: ${variantsResult.items.length}');
-        
-        setState(() {
-          _productVariants = variantsResult.items.map((record) => {
-            'id': record.id,
-            'product_id': record.data['product_id'],
-            'variant_size': record.data['variant_size'] ?? '',
-          }).toList();
-        });
-        debugPrint('Product variants loaded: ${_productVariants.length}');
-      } catch (e) {
-        debugPrint('Error fetching product variants: $e');
-      }
-
-      // Fetch product reviews
-      try {
-        debugPrint('Fetching product reviews for product_id: ${widget.productId}');
-        
-        final reviewsResult = await pb.collection('product_reviews').getList(
-          filter: 'product_id ~ "${widget.productId}"',
-          sort: '-created',
-          expand: 'user_id',
-        );
-        
-        debugPrint('Reviews found: ${reviewsResult.items.length}');
-        
-        setState(() {
-          _productReviews = reviewsResult.items.map((record) => {
-            'id': record.id,
-            'user_id': record.data['user_id'],
-            'product_id': record.data['product_id'],
-            'rating': record.data['rating'] ?? 0,
-            'title': record.data['title'] ?? '',
-            'comment': record.data['comment'] ?? '',
-            'created': record.created,
-            'user_name': _getUserNameFromExpand(record),
-          }).toList();
-        });
-        debugPrint('Product reviews loaded: ${_productReviews.length}');
-      } catch (e) {
-        debugPrint('Error fetching product reviews: $e');
-      }
-
-      // Check if product is liked by current user
-      if (authProvider.isLoggedIn) {
-        try {
-          final userModel = authProvider.pb.authStore.model;
-          final userId = userModel?.id;
-          
-          if (userId != null) {
-            final likedResult = await pb.collection('user_liked_products').getList(
-              filter: 'user_id = "$userId" && product_id ~ "${widget.productId}"',
-            );
-            
-            setState(() {
-              _isLiked = likedResult.items.isNotEmpty;
-            });
-          }
-        } catch (e) {
-          debugPrint('Error checking liked status: $e');
-        }
-      }
+      
+      // 3. Muat varian produk
+      await _loadVariants(pb);
+      
+      // 4. Muat review produk
+      await _loadReviews(pb);
+      
+      // 5. Cek status like
+      await _checkIfLiked(pb, authProvider);
 
       setState(() {
         _isLoading = false;
@@ -241,138 +148,217 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
     } catch (e) {
       debugPrint('Error loading product data: $e');
       setState(() {
-        _errorMessage = 'Failed to load product: $e';
+        _errorMessage = 'Gagal memuat data produk: ${e.toString()}';
         _isLoading = false;
       });
     }
   }
 
-  // FIXED: Load images from both products table and product_images table
-  Future<void> _loadAllImages(PocketBase pb) async {
-    List<Map<String, dynamic>> combinedImages = [];
+  // Memuat data produk utama dengan relasi skin_type
+  Future<void> _loadMainProduct(PocketBase pb) async {
+    final productRecord = await pb.collection('products').getOne(
+      widget.productId,
+      expand: 'skin_type',
+    );
     
-    // 1. Add main product image from products table
-    if (_product != null && _product!['image_url'].isNotEmpty) {
-      combinedImages.add({
-        'id': 'main_product',
-        'product_id': widget.productId,
-        'image_url': _product!['image_url'],
-        'sort_order': 0,
-        'source': 'products_table',
-      });
-    }
+    setState(() {
+      _product = {
+        'id': productRecord.id,
+        'name': productRecord.data['name'] ?? '',
+        'price': productRecord.data['price'] ?? 0,
+        'image_url': productRecord.data['image_url'] ?? '',
+        'description': productRecord.data['description'] ?? '',
+        'rating': productRecord.data['rating'] ?? 0.0,
+        'skin_type': productRecord.data['skin_type'] ?? [],
+        'brand': productRecord.data['brand'] ?? '',
+        'expanded_skin_types': productRecord.expand?['skin_type'] ?? [],
+      };
+    });
+  }
+
+  // Memuat semua gambar dari tabel products dan product_images
+Future<void> _loadAllImages(PocketBase pb) async {
+  List<Map<String, dynamic>> combinedImages = [];
+  
+  // 1. Tambahkan gambar utama dari tabel products (selalu pertama)
+  if (_product != null && _product!['image_url'] != null && _product!['image_url'].toString().isNotEmpty) {
+    combinedImages.add({
+      'id': 'main_product',
+      'product_id': widget.productId,
+      'image_url': _product!['image_url'].toString(),
+      'sort_order': 0,
+      'source': 'products',
+    });
+  }
+  
+  // 2. Tambahkan gambar tambahan dari tabel product_images
+  try {
+    final imagesResult = await pb.collection('product_images').getList(
+      page: 1,
+      perPage: 10,
+      filter: 'product_id = "${widget.productId}"',
+      sort: 'sort_order',
+    );
     
-    // 2. Add additional images from product_images table
-    try {
-      debugPrint('Fetching additional product images for product_id: ${widget.productId}');
-      
-      final imagesResult = await pb.collection('product_images').getList(
-        filter: 'product_id ~ "${widget.productId}"',
-        sort: 'sort_order',
-      );
-      
-      debugPrint('Additional images found: ${imagesResult.items.length}');
-      
-      for (var record in imagesResult.items) {
+    debugPrint('Gambar tambahan ditemukan: ${imagesResult.items.length}');
+    
+    for (var record in imagesResult.items) {
+      final imageUrl = record.data['image_url'];
+      if (imageUrl != null && imageUrl.toString().isNotEmpty) {
         combinedImages.add({
           'id': record.id,
           'product_id': record.data['product_id'],
-          'image_url': record.data['image_url'] ?? '',
-          'sort_order': record.data['sort_order'] ?? 1,
-          'source': 'product_images_table',
+          'image_url': imageUrl.toString(),
+          'sort_order': record.data['sort_order'] ?? (combinedImages.length + 1),
+          'source': 'product_images',
         });
       }
-    } catch (e) {
-      debugPrint('Error fetching additional product images: $e');
     }
-    
-    // Sort by sort_order
-    combinedImages.sort((a, b) => (a['sort_order'] as int).compareTo(b['sort_order'] as int));
-    
-    setState(() {
-      _allImages = combinedImages;
-    });
-    
-    debugPrint('Total images loaded: ${_allImages.length}');
-    for (var img in _allImages) {
-      debugPrint('Image: ${img['source']} - ${img['image_url']}');
+  } catch (e) {
+    debugPrint('Error mengambil gambar tambahan: $e');
+  }
+  
+  // Urutkan berdasarkan sort_order
+  combinedImages.sort((a, b) => (a['sort_order'] as int).compareTo(b['sort_order'] as int));
+  
+  setState(() {
+    _allImages = combinedImages;
+  });
+  
+  debugPrint('Total gambar dimuat: ${_allImages.length}');
+  for (var img in _allImages) {
+    debugPrint('Gambar: ${img['source']} - ${img['image_url']}');
+  }
+}
+
+  // Memuat varian produk dari tabel product_variants
+  Future<void> _loadVariants(PocketBase pb) async {
+    try {
+      final variantsResult = await pb.collection('product_variants').getList(
+        filter: 'product_id = "${widget.productId}"',
+        sort: 'variant_size',
+      );
+      
+      setState(() {
+        _productVariants = variantsResult.items.map((record) => {
+          'id': record.id,
+          'product_id': record.data['product_id'],
+          'variant_size': record.data['variant_size'] ?? '',
+        }).toList();
+      });
+      
+      debugPrint('Varian produk dimuat: ${_productVariants.length}');
+    } catch (e) {
+      debugPrint('Error mengambil varian: $e');
     }
   }
 
+  // Memuat review produk dari tabel product_reviews
+  Future<void> _loadReviews(PocketBase pb) async {
+    try {
+      final reviewsResult = await pb.collection('product_reviews').getList(
+        filter: 'product_id = "${widget.productId}"',
+        sort: '-created',
+        expand: 'user_id',
+        perPage: 20,
+      );
+      
+      setState(() {
+        _productReviews = reviewsResult.items.map((record) => {
+          'id': record.id,
+          'user_id': record.data['user_id'],
+          'product_id': record.data['product_id'],
+          'rating': record.data['rating'] ?? 0,
+          'title': record.data['title'] ?? '',
+          'comment': record.data['comment'] ?? '',
+          'created': record.created,
+          'user_name': _getUserNameFromExpand(record),
+        }).toList();
+      });
+      
+      debugPrint('Review dimuat: ${_productReviews.length}');
+    } catch (e) {
+      debugPrint('Error mengambil review: $e');
+    }
+  }
+
+  // Cek apakah produk disukai user
+  Future<void> _checkIfLiked(PocketBase pb, AuthProvider authProvider) async {
+    if (!authProvider.isLoggedIn) return;
+    
+    try {
+      final userModel = authProvider.pb.authStore.model;
+      final userId = userModel?.id;
+      
+      if (userId != null) {
+        final likedResult = await pb.collection('user_liked_products').getList(
+          filter: 'user_id = "$userId" && product_id = "${widget.productId}"',
+        );
+        
+        setState(() {
+          _isLiked = likedResult.items.isNotEmpty;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error mengecek status like: $e');
+    }
+  }
+
+  // Helper function untuk mendapatkan nama user dari expand
   String _getUserNameFromExpand(dynamic record) {
     try {
       if (record.expand != null && record.expand['user_id'] != null) {
         final userData = record.expand['user_id'];
-        if (userData is Map && userData['name'] != null) {
-          return userData['name'].toString();
-        }
         if (userData.data != null && userData.data['name'] != null) {
           return userData.data['name'].toString();
         }
       }
-      return 'Anonymous';
+      return 'Pengguna Anonim';
     } catch (e) {
-      debugPrint('Error getting user name from expand: $e');
-      return 'Anonymous';
+      return 'Pengguna Anonim';
     }
   }
 
-  String _getSkinTypeNames(dynamic skinTypes) {
-    if (skinTypes == null) return '';
+  // Mendapatkan nama jenis kulit dari relasi yang di-expand
+  String _getSkinTypeNames() {
+    if (_product == null) return 'Semua Jenis Kulit';
     
     List<String> typeNames = [];
     
-    if (skinTypes is List) {
-      for (var type in skinTypes) {
-        String typeName = _convertSkinTypeIdToName(type.toString());
-        if (typeName.isNotEmpty) {
-          typeNames.add(typeName);
+    if (_product!['expanded_skin_types'] != null && _product!['expanded_skin_types'].isNotEmpty) {
+      for (var skinType in _product!['expanded_skin_types']) {
+        if (skinType.data != null && skinType.data['nama'] != null) {
+          typeNames.add(skinType.data['nama'].toString());
         }
       }
-    } else {
-      String typeName = _convertSkinTypeIdToName(skinTypes.toString());
-      if (typeName.isNotEmpty) {
-        typeNames.add(typeName);
+    }
+    
+    return typeNames.isNotEmpty ? typeNames.join(', ') : 'Semua Jenis Kulit';
+  }
+
+  // Mendapatkan deskripsi jenis kulit
+  String _getSkinTypeDescriptions() {
+    if (_product == null) return '';
+    
+    List<String> descriptions = [];
+    
+    if (_product!['expanded_skin_types'] != null && _product!['expanded_skin_types'].isNotEmpty) {
+      for (var skinType in _product!['expanded_skin_types']) {
+        if (skinType.data != null && skinType.data['description'] != null) {
+          descriptions.add(skinType.data['description'].toString());
+        }
       }
     }
     
-    return typeNames.join(', ');
+    return descriptions.isNotEmpty ? descriptions.join(' • ') : '';
   }
 
-  String _convertSkinTypeIdToName(String typeId) {
-    final skinTypeMap = {
-      'kering': 'Kulit Kering',
-      'berminyak': 'Kulit Berminyak', 
-      'sensitif': 'Kulit Sensitif',
-      'kombinasi': 'Kulit Kombinasi',
-      'dry': 'Kulit Kering',
-      'oily': 'Kulit Berminyak',
-      'sensitive': 'Kulit Sensitif',
-      'combination': 'Kulit Kombinasi',
-      'normal': 'Kulit Normal',
-    };
-    
-    String lowerType = typeId.toLowerCase().trim();
-    
-    if (lowerType.contains('kulit') || lowerType.length > 10) {
-      return typeId;
-    }
-    
-    for (var entry in skinTypeMap.entries) {
-      if (lowerType.contains(entry.key)) {
-        return entry.value;
-      }
-    }
-    
-    if (typeId.isNotEmpty) {
-      return typeId[0].toUpperCase() + typeId.substring(1);
-    }
-    
-    return typeId;
-  }
-
+  // Format harga ke Rupiah
   String _formatPrice(double price) {
-    return price.toStringAsFixed(0);
+    return price.toStringAsFixed(0).replaceAllMapped(
+      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), 
+      (Match m) => '${m[1]}.'
+    );
   }
 
   double _getCurrentPrice() {
@@ -380,8 +366,113 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
     return _product!['price'].toDouble();
   }
 
+  // Fungsi untuk submit review baru
+  Future<void> _submitReview() async {
+    if (_reviewTitleController.text.trim().isEmpty || 
+        _reviewCommentController.text.trim().isEmpty) {
+      _showSnackBar('Mohon isi semua field review', isError: true);
+      return;
+    }
+
+    setState(() {
+      _isSubmittingReview = true;
+    });
+
+    try {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      
+      if (!authProvider.isLoggedIn) {
+        _showSnackBar('Silakan login terlebih dahulu untuk memberikan review', isError: true);
+        return;
+      }
+
+      final userModel = authProvider.pb.authStore.model;
+      final userId = userModel?.id;
+
+      if (userId == null) {
+        _showSnackBar('User ID tidak ditemukan', isError: true);
+        return;
+      }
+
+      await authProvider.pb.collection('product_reviews').create(body: {
+        'user_id': userId,
+        'product_id': widget.productId,
+        'rating': _selectedRating,
+        'title': _reviewTitleController.text.trim(),
+        'comment': _reviewCommentController.text.trim(),
+      });
+
+      _showSnackBar('Review berhasil dikirim!');
+      
+      // Reset form
+      _reviewTitleController.clear();
+      _reviewCommentController.clear();
+      _selectedRating = 5;
+      setState(() {
+        _showReviewForm = false;
+      });
+      
+      // Reload reviews
+      await _loadReviews(authProvider.pb);
+
+    } catch (e) {
+      debugPrint('Error submitting review: $e');
+      _showSnackBar('Gagal mengirim review: ${e.toString()}', isError: true);
+    } finally {
+      setState(() {
+        _isSubmittingReview = false;
+      });
+    }
+  }
+
+  // Fungsi untuk toggle like/unlike
+  Future<void> _toggleLike() async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    
+    if (!authProvider.isLoggedIn) {
+      _showSnackBar('Silakan login untuk menyukai produk', isError: true);
+      return;
+    }
+
+    try {
+      final userModel = authProvider.pb.authStore.model;
+      final userId = userModel?.id;
+
+      if (userId == null) return;
+
+      if (_isLiked) {
+        // Hapus like
+        final likedResult = await authProvider.pb.collection('user_liked_products').getList(
+          filter: 'user_id = "$userId" && product_id = "${widget.productId}"',
+        );
+        
+        if (likedResult.items.isNotEmpty) {
+          await authProvider.pb.collection('user_liked_products').delete(likedResult.items.first.id);
+        }
+      } else {
+        // Tambah like
+        await authProvider.pb.collection('user_liked_products').create(body: {
+          'user_id': userId,
+          'product_id': widget.productId,
+        });
+      }
+
+      setState(() {
+        _isLiked = !_isLiked;
+      });
+
+    } catch (e) {
+      debugPrint('Error toggling like: $e');
+      _showSnackBar('Gagal mengubah status like', isError: true);
+    }
+  }
+
+  // Fungsi untuk menambah ke keranjang
   Future<void> _addToCart() async {
     if (_product == null) return;
+    
+    // Animasi bounce untuk feedback
+    _bounceController.forward().then((_) => _bounceController.reverse());
     
     try {
       final cartProvider = Provider.of<CartProvider>(context, listen: false);
@@ -401,394 +492,250 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
       
       cartProvider.addToCart(productWithQuantity);
       
-      if (mounted) {
-        _pulseController.forward().then((_) {
-          _pulseController.reverse();
-        });
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.check_circle, color: Colors.white),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '${_product!['name']} ditambahkan ke keranjang',
-                    style: GoogleFonts.poppins(color: Colors.white),
-                  ),
+      _showSnackBar('${_product!['name']} successfully added to cart');
+
+    } catch (e) {
+      _showSnackBar('Gagal menambahkan ke keranjang', isError: true);
+    }
+  }
+
+  // Helper function untuk menampilkan snackbar
+  void _showSnackBar(String message, {bool isError = false}) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(
+                isError ? Icons.error_outline : Icons.check_circle,
+                color: Colors.white,
+                size: 18,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  message,
+                  style: GoogleFonts.poppins(color: Colors.white, fontSize: 13),
                 ),
-              ],
-            ),
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Gagal menambahkan ke keranjang: $e',
-              style: GoogleFonts.poppins(color: Colors.white),
-            ),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _toggleFavorite() async {
-    if (_product == null) return;
-    
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    
-    if (!authProvider.isLoggedIn) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Please login to like products',
-            style: GoogleFonts.poppins(color: Colors.white),
-          ),
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        ),
-      );
-      return;
-    }
-
-    try {
-      final pb = authProvider.pb;
-      final userModel = authProvider.pb.authStore.model;
-      final userId = userModel?.id;
-      
-      if (userId == null) return;
-
-      if (_isLiked) {
-        final likedResult = await pb.collection('user_liked_products').getList(
-          filter: 'user_id = "$userId" && product_id ~ "${widget.productId}"',
-        );
-        
-        for (var record in likedResult.items) {
-          await pb.collection('user_liked_products').delete(record.id);
-        }
-        
-        setState(() {
-          _isLiked = false;
-        });
-      } else {
-        await pb.collection('user_liked_products').create(
-          body: {
-            'user_id': userId,
-            'product_id': [widget.productId],
-            'liked_at': DateTime.now().toIso8601String(),
-          },
-        );
-        
-        setState(() {
-          _isLiked = true;
-        });
-      }
-    } catch (e) {
-      debugPrint('Error toggling favorite: $e');
-    }
-  }
-
-  // NEW: Submit review function
-  Future<void> _submitReview() async {
-    if (_product == null) return;
-    
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    
-    if (!authProvider.isLoggedIn) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Please login to submit a review',
-            style: GoogleFonts.poppins(color: Colors.white),
-          ),
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        ),
-      );
-      return;
-    }
-
-    if (_reviewTitleController.text.trim().isEmpty || _reviewCommentController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Please fill in all review fields',
-            style: GoogleFonts.poppins(color: Colors.white),
-          ),
-          backgroundColor: Colors.orange,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        ),
-      );
-      return;
-    }
-
-    setState(() {
-      _isSubmittingReview = true;
-    });
-
-    try {
-      final pb = authProvider.pb;
-      final userModel = authProvider.pb.authStore.model;
-      final userId = userModel?.id;
-      
-      if (userId == null) return;
-
-      // Submit review to product_reviews table
-      await pb.collection('product_reviews').create(
-        body: {
-          'user_id': userId,
-          'product_id': [widget.productId], // Relation field
-          'rating': _selectedRating,
-          'title': _reviewTitleController.text.trim(),
-          'comment': _reviewCommentController.text.trim(),
-        },
-      );
-
-      // Clear form
-      _reviewTitleController.clear();
-      _reviewCommentController.clear();
-      setState(() {
-        _selectedRating = 5;
-        _showReviewForm = false;
-        _isSubmittingReview = false;
-      });
-
-      // Reload reviews
-      await _loadProductData();
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.check_circle, color: Colors.white),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Review berhasil dikirim!',
-                    style: GoogleFonts.poppins(color: Colors.white),
-                  ),
-                ),
-              ],
-            ),
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
-    } catch (e) {
-      setState(() {
-        _isSubmittingReview = false;
-      });
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Gagal mengirim review: $e',
-              style: GoogleFonts.poppins(color: Colors.white),
-            ),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          ),
-        );
-      }
-    }
-  }
-
-  Widget _buildImageCarousel() {
-    final images = _allImages.isNotEmpty ? _allImages : [
-      {
-        'id': 'default',
-        'product_id': widget.productId,
-        'image_url': _product?['image_url'] ?? '',
-        'sort_order': 0,
-        'source': 'default',
-      }
-    ];
-    
-    return Column(
-      children: [
-        Container(
-          height: 280,
-          width: double.infinity,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.08),
-                blurRadius: 15,
-                offset: const Offset(0, 3),
               ),
             ],
           ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: PageView.builder(
-              itemCount: images.length,
-              onPageChanged: (index) => setState(() => _selectedImageIndex = index),
-              itemBuilder: (context, index) {
-                return Stack(
-                  children: [
-                    Image.network(
-                      images[index]['image_url'],
-                      fit: BoxFit.cover,
-                      width: double.infinity,
-                      height: double.infinity,
-                      loadingBuilder: (context, child, loadingProgress) {
-                        if (loadingProgress == null) return child;
-                        
-                        return Container(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [Colors.grey[200]!, Colors.grey[100]!, Colors.grey[200]!],
-                            ),
-                          ),
-                          child: const Center(
-                            child: CircularProgressIndicator(color: Color(0xFFEC407A)),
-                          ),
-                        );
-                      },
-                      errorBuilder: (context, error, stackTrace) {
-                        return Container(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [Colors.grey[200]!, Colors.grey[300]!],
-                            ),
-                          ),
-                          child: const Icon(Icons.broken_image, size: 50, color: Colors.grey),
-                        );
-                      },
-                    ),
-                    // Image source indicator
-                    Positioned(
-                      top: 8,
-                      right: 8,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.6),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          images[index]['source'] == 'products_table' ? 'Main' : 'Gallery',
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontSize: 8,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-          ),
+          backgroundColor: isError ? Colors.red : Colors.green,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          duration: const Duration(seconds: 3),
+          margin: const EdgeInsets.all(16),
         ),
-        if (images.length > 1) ...[
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: images.asMap().entries.map((entry) {
-              return Container(
-                width: 6,
-                height: 6,
-                margin: const EdgeInsets.symmetric(horizontal: 3),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: _selectedImageIndex == entry.key
-                      ? const Color(0xFFEC407A)
-                      : Colors.grey[300],
-                ),
-              );
-            }).toList(),
-          ),
-        ],
-      ],
-    );
+      );
+    }
   }
 
+  // Widget untuk carousel gambar yang indah
+Widget _buildImageCarousel() {
+  // Pastikan ada gambar untuk ditampilkan
+  List<Map<String, dynamic>> images = [];
+  
+  if (_allImages.isNotEmpty) {
+    images = _allImages;
+  } else if (_product != null && _product!['image_url'] != null && _product!['image_url'].toString().isNotEmpty) {
+    // Fallback ke gambar utama jika tidak ada gambar di _allImages
+    images = [
+      {
+        'id': 'fallback',
+        'product_id': widget.productId,
+        'image_url': _product!['image_url'].toString(),
+        'sort_order': 0,
+        'source': 'products',
+      }
+    ];
+  } else {
+    // Placeholder jika tidak ada gambar sama sekali
+    images = [
+      {
+        'id': 'placeholder',
+        'product_id': widget.productId,
+        'image_url': 'https://via.placeholder.com/400x400/FFB6C1/FFFFFF?text=No+Image',
+        'sort_order': 0,
+        'source': 'placeholder',
+      }
+    ];
+  }
+  
+  return Container(
+    height: 320,
+    width: double.infinity,
+    margin: const EdgeInsets.symmetric(horizontal: 16),
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(24),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.15),
+          blurRadius: 25,
+          offset: const Offset(0, 10),
+        ),
+      ],
+    ),
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: Stack(
+        children: [
+          // PageView untuk swipe gambar
+          PageView.builder(
+            itemCount: images.length,
+            onPageChanged: (index) {
+              setState(() => _selectedImageIndex = index);
+            },
+            itemBuilder: (context, index) {
+              final imageUrl = images[index]['image_url'].toString();
+              
+              return Hero(
+                tag: 'product_image_${images[index]['id']}',
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        const Color(0xFFEC407A).withOpacity(0.08),
+                        const Color(0xFFF48FB1).withOpacity(0.08),
+                      ],
+                    ),
+                  ),
+                  child: Image.network(
+                    imageUrl,
+                    fit: BoxFit.cover,
+                    width: double.infinity,
+                    height: double.infinity,
+                    loadingBuilder: (context, child, loadingProgress) {
+                      if (loadingProgress == null) return child;
+                      
+                      return Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              Colors.grey[100]!,
+                              Colors.grey[50]!,
+                            ],
+                          ),
+                        ),
+                        child: Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              SizedBox(
+                                width: 40,
+                                height: 40,
+                                child: CircularProgressIndicator(
+                                  color: const Color(0xFFEC407A),
+                                  strokeWidth: 3,
+                                  value: loadingProgress.expectedTotalBytes != null
+                                      ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                                      : null,
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                'Loading image...',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 12,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                    errorBuilder: (context, error, stackTrace) {
+                      return Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              Colors.grey[100]!,
+                              Colors.grey[50]!,
+                            ],
+                          ),
+                        ),
+                        child: Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.broken_image, size: 56, color: Colors.grey[400]),
+                              const SizedBox(height: 12),
+                              Text(
+                                'Image not available',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 12,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              );
+            },
+          ),
+          
+          // Indikator gambar yang indah (hanya tampil jika ada lebih dari 1 gambar)
+          if (images.length > 1)
+            Positioned(
+              bottom: 20,
+              left: 0,
+              right: 0,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: images.asMap().entries.map((entry) {
+                  return AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    width: _selectedImageIndex == entry.key ? 28 : 8,
+                    height: 8,
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(4),
+                      color: _selectedImageIndex == entry.key
+                          ? const Color(0xFFEC407A)
+                          : Colors.white.withOpacity(0.7),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.3),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+        ],
+      ),
+    ),
+  );
+}
+
+  // Widget untuk selector varian yang indah
   Widget _buildVariantSelector() {
     if (_productVariants.isEmpty) return const SizedBox.shrink();
     
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'UKURAN:',
-          style: GoogleFonts.poppins(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: Colors.grey[700],
-          ),
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          children: _productVariants.asMap().entries.map((entry) {
-            final index = entry.key;
-            final variant = entry.value;
-            final isSelected = index == _selectedVariantIndex;
-            
-            return GestureDetector(
-              onTap: () => setState(() => _selectedVariantIndex = index),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: isSelected ? const Color(0xFFEC407A) : Colors.white,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: isSelected ? const Color(0xFFEC407A) : Colors.grey[300]!,
-                  ),
-                ),
-                child: Text(
-                  variant['variant_size'],
-                  style: GoogleFonts.poppins(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                    color: isSelected ? Colors.white : Colors.grey[700],
-                  ),
-                ),
-              ),
-            );
-          }).toList(),
-        ),
-        const SizedBox(height: 16),
-      ],
-    );
-  }
-
-  // NEW: Review form widget
-  Widget _buildReviewForm() {
     return Container(
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.08),
             blurRadius: 15,
-            offset: const Offset(0, 3),
+            offset: const Offset(0, 5),
           ),
         ],
       ),
@@ -796,32 +743,138 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Tulis Review',
-                style: GoogleFonts.poppins(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: const Color(0xFF333333),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      const Color(0xFFEC407A).withOpacity(0.15),
+                      const Color(0xFFF48FB1).withOpacity(0.15),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.straighten_rounded,
+                  color: const Color(0xFFEC407A),
+                  size: 20,
                 ),
               ),
-              IconButton(
-                onPressed: () => setState(() => _showReviewForm = false),
-                icon: const Icon(Icons.close, size: 20),
-                color: Colors.grey[600],
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Pilih Ukuran',
+                      style: GoogleFonts.poppins(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFF333333),
+                      ),
+                    ),
+                    Text(
+                      'Tersedia ${_productVariants.length} pilihan ukuran',
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: _productVariants.asMap().entries.map((entry) {
+              final index = entry.key;
+              final variant = entry.value;
+              final isSelected = index == _selectedVariantIndex;
+              
+              return GestureDetector(
+                onTap: () => setState(() => _selectedVariantIndex = index),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  decoration: BoxDecoration(
+                    gradient: isSelected ? LinearGradient(
+                      colors: [const Color(0xFFEC407A), const Color(0xFFF48FB1)],
+                    ) : null,
+                    color: isSelected ? null : Colors.grey[100],
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: isSelected ? Colors.transparent : Colors.grey[300]!,
+                      width: 1.5,
+                    ),
+                    boxShadow: isSelected ? [
+                      BoxShadow(
+                        color: const Color(0xFFEC407A).withOpacity(0.4),
+                        blurRadius: 12,
+                        offset: const Offset(0, 6),
+                      ),
+                    ] : null,
+                  ),
+                  child: Text(
+                    variant['variant_size'],
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: isSelected ? Colors.white : Colors.grey[700],
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Widget untuk form review
+  Widget _buildReviewForm() {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            const Color(0xFFEC407A).withOpacity(0.08),
+            const Color(0xFFF48FB1).withOpacity(0.08),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: const Color(0xFFEC407A).withOpacity(0.2),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Tulis Review Anda',
+            style: GoogleFonts.poppins(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: const Color(0xFF333333),
+            ),
           ),
           const SizedBox(height: 16),
           
           // Rating selector
           Text(
-            'Rating:',
+            'Rating',
             style: GoogleFonts.poppins(
               fontSize: 14,
               fontWeight: FontWeight.w600,
-              color: Colors.grey[700],
+              color: const Color(0xFF333333),
             ),
           ),
           const SizedBox(height: 8),
@@ -829,52 +882,58 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
             children: List.generate(5, (index) {
               return GestureDetector(
                 onTap: () => setState(() => _selectedRating = index + 1),
-                child: Icon(
-                  index < _selectedRating ? Icons.star : Icons.star_border,
-                  color: Colors.amber,
-                  size: 28,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Icon(
+                    Icons.star_rounded,
+                    size: 32,
+                    color: index < _selectedRating 
+                        ? Colors.amber 
+                        : Colors.grey[300],
+                  ),
                 ),
               );
             }),
           ),
           const SizedBox(height: 16),
           
-          // Title field
+          // Title input
           Text(
-            'Judul Review:',
+            'Judul Review',
             style: GoogleFonts.poppins(
               fontSize: 14,
               fontWeight: FontWeight.w600,
-              color: Colors.grey[700],
+              color: const Color(0xFF333333),
             ),
           ),
           const SizedBox(height: 8),
           TextField(
             controller: _reviewTitleController,
             decoration: InputDecoration(
-              hintText: 'Masukkan judul review...',
-              hintStyle: GoogleFonts.poppins(fontSize: 12, color: Colors.grey[500]),
+              hintText: 'Berikan judul untuk review Anda',
+              hintStyle: GoogleFonts.poppins(
+                fontSize: 13,
+                color: Colors.grey[500],
+              ),
+              filled: true,
+              fillColor: Colors.white.withOpacity(0.8),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Colors.grey[300]!),
+                borderSide: BorderSide.none,
               ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: Color(0xFFEC407A)),
-              ),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             ),
-            style: GoogleFonts.poppins(fontSize: 12),
+            style: GoogleFonts.poppins(fontSize: 13),
           ),
           const SizedBox(height: 16),
           
-          // Comment field
+          // Comment input
           Text(
-            'Komentar:',
+            'Komentar',
             style: GoogleFonts.poppins(
               fontSize: 14,
               fontWeight: FontWeight.w600,
-              color: Colors.grey[700],
+              color: const Color(0xFF333333),
             ),
           ),
           const SizedBox(height: 8),
@@ -882,284 +941,79 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
             controller: _reviewCommentController,
             maxLines: 4,
             decoration: InputDecoration(
-              hintText: 'Tulis pengalaman Anda dengan produk ini...',
-              hintStyle: GoogleFonts.poppins(fontSize: 12, color: Colors.grey[500]),
+              hintText: 'Bagikan pengalaman Anda menggunakan produk ini',
+              hintStyle: GoogleFonts.poppins(
+                fontSize: 13,
+                color: Colors.grey[500],
+              ),
+              filled: true,
+              fillColor: Colors.white.withOpacity(0.8),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Colors.grey[300]!),
+                borderSide: BorderSide.none,
               ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: Color(0xFFEC407A)),
-              ),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              contentPadding: const EdgeInsets.all(16),
             ),
-            style: GoogleFonts.poppins(fontSize: 12),
+            style: GoogleFonts.poppins(fontSize: 13),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
           
-          // Submit button
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: _isSubmittingReview ? null : _submitReview,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFEC407A),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-              child: _isSubmittingReview
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
-                        strokeWidth: 2,
-                      ),
-                    )
-                  : Text(
-                      'Kirim Review',
-                      style: GoogleFonts.poppins(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 14,
-                      ),
-                    ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildReviewsSection() {
-    // Calculate average rating
-    double averageRating = 0.0;
-    if (_productReviews.isNotEmpty) {
-      double totalRating = _productReviews.fold(0.0, (sum, review) => sum + review['rating']);
-      averageRating = totalRating / _productReviews.length;
-    }
-    
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 15,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Reviews (${_productReviews.length})',
-                style: GoogleFonts.poppins(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: const Color(0xFF333333),
-                ),
-              ),
-              if (_productReviews.isNotEmpty)
-                Row(
-                  children: [
-                    Row(
-                      children: List.generate(5, (index) {
-                        return Icon(
-                          index < averageRating.floor() ? Icons.star : Icons.star_border,
-                          color: Colors.amber,
-                          size: 14,
-                        );
-                      }),
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      averageRating.toStringAsFixed(1),
-                      style: GoogleFonts.poppins(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          
-          // Add review button
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: () => setState(() => _showReviewForm = !_showReviewForm),
-              icon: Icon(
-                _showReviewForm ? Icons.close : Icons.add,
-                color: const Color(0xFFEC407A),
-                size: 18,
-              ),
-              label: Text(
-                _showReviewForm ? 'Tutup Form' : 'Tulis Review',
-                style: GoogleFonts.poppins(
-                  color: const Color(0xFFEC407A),
-                  fontWeight: FontWeight.w600,
-                  fontSize: 12,
-                ),
-              ),
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: Color(0xFFEC407A)),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                padding: const EdgeInsets.symmetric(vertical: 8),
-              ),
-            ),
-          ),
-          
-          if (_productReviews.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            ...(_productReviews.take(3).map((review) => _buildReviewItem(review))),
-            if (_productReviews.length > 3)
-              TextButton(
-                onPressed: () {
-                  // Navigate to full reviews screen
-                },
-                child: Text(
-                  'Lihat semua review',
-                  style: GoogleFonts.poppins(
-                    color: const Color(0xFFEC407A),
-                    fontWeight: FontWeight.w600,
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-          ] else ...[
-            const SizedBox(height: 16),
-            Center(
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.rate_review_outlined,
-                    size: 48,
-                    color: Colors.grey[400],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Belum ada review untuk produk ini',
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Jadilah yang pertama memberikan review!',
-                    style: GoogleFonts.poppins(
-                      fontSize: 10,
-                      color: Colors.grey[500],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildReviewItem(Map<String, dynamic> review) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.grey[200]!),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+          // Action buttons
           Row(
             children: [
-              CircleAvatar(
-                radius: 14,
-                backgroundColor: const Color(0xFFEC407A),
-                child: Text(
-                  (review['user_name'] ?? 'U').substring(0, 1).toUpperCase(),
-                  style: GoogleFonts.poppins(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 10,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      review['user_name'] ?? 'Anonymous',
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                      ),
+                child: ElevatedButton(
+                  onPressed: _isSubmittingReview ? null : _submitReview,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFEC407A),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    Row(
-                      children: [
-                        Row(
-                          children: List.generate(5, (index) {
-                            return Icon(
-                              index < review['rating'] ? Icons.star : Icons.star_border,
-                              color: Colors.amber,
-                              size: 10,
-                            );
-                          }),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          review['created'].toString().split('T')[0],
+                    elevation: 0,
+                  ),
+                  child: _isSubmittingReview
+                      ? SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : Text(
+                          'Kirim Review',
                           style: GoogleFonts.poppins(
-                            fontSize: 9,
-                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
                           ),
                         ),
-                      ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => setState(() => _showReviewForm = false),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFEC407A),
+                    side: BorderSide(color: const Color(0xFFEC407A)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                  ],
+                  ),
+                  child: Text(
+                    'Batal',
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                  ),
                 ),
               ),
             ],
           ),
-          if (review['title'].isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Text(
-              review['title'],
-              style: GoogleFonts.poppins(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-          if (review['comment'].isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(
-              review['comment'],
-              style: GoogleFonts.poppins(
-                fontSize: 10,
-                color: Colors.grey[700],
-                height: 1.3,
-              ),
-            ),
-          ],
         ],
       ),
     );
@@ -1181,37 +1035,39 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
           ),
           backgroundColor: const Color(0xFFF8BBD0),
           centerTitle: true,
+          elevation: 0,
         ),
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                width: 60,
-                height: 60,
-                decoration: BoxDecoration(
+                width: 80,
+                height: 80,
+                decoration: const BoxDecoration(
                   gradient: LinearGradient(
-                    colors: [
-                      const Color(0xFFF48FB1),
-                      const Color(0xFFEC407A),
-                    ],
+                    colors: [Color(0xFFF48FB1), Color(0xFFEC407A)],
                   ),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(
-                  Icons.shopping_bag,
-                  color: Colors.white,
-                  size: 30,
-                ),
+                child: const Icon(Icons.shopping_bag_rounded, color: Colors.white, size: 40),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 24),
               Text(
                 'Memuat detail produk...',
                 style: GoogleFonts.poppins(
-                  fontSize: 14,
+                  fontSize: 16,
                   color: Colors.grey[700],
+                  fontWeight: FontWeight.w500,
                 ),
-                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: 200,
+                child: LinearProgressIndicator(
+                  backgroundColor: Colors.grey[300],
+                  valueColor: AlwaysStoppedAnimation<Color>(const Color(0xFFEC407A)),
+                ),
               ),
             ],
           ),
@@ -1225,46 +1081,58 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
         appBar: AppBar(
           title: Text(
             'Detail Produk',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 18),
           ),
           backgroundColor: const Color(0xFFF8BBD0),
+          elevation: 0,
         ),
         body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.error_outline,
-                size: 64,
-                color: Colors.red[300],
-              ),
-              const SizedBox(height: 16),
-              Text(
-                _errorMessage!,
-                style: GoogleFonts.poppins(
-                  color: Colors.red,
-                  fontSize: 14,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: _loadProductData,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFEC407A),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: Colors.red[100],
+                    shape: BoxShape.circle,
                   ),
+                  child: Icon(Icons.error_outline_rounded, size: 40, color: Colors.red[400]),
                 ),
-                child: Text(
-                  'Coba Lagi',
+                const SizedBox(height: 24),
+                Text(
+                  'Terjadi Kesalahan',
                   style: GoogleFonts.poppins(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w500,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.red[700],
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 12),
+                Text(
+                  _errorMessage!,
+                  style: GoogleFonts.poppins(color: Colors.red[600], fontSize: 14),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton.icon(
+                  onPressed: _loadProductData,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: Text(
+                    'Coba Lagi',
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFEC407A),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       );
@@ -1276,11 +1144,12 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
         appBar: AppBar(
           title: Text(
             'Detail Produk',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 18),
           ),
           backgroundColor: const Color(0xFFF8BBD0),
+          elevation: 0,
         ),
-        body: const Center(child: Text('Product not found')),
+        body: const Center(child: Text('Produk tidak ditemukan')),
       );
     }
 
@@ -1300,15 +1169,17 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
         ),
         backgroundColor: const Color(0xFFF8BBD0),
         centerTitle: true,
+        elevation: 0,
         actions: [
           FadeTransition(
             opacity: _fadeAnimation,
             child: IconButton(
               icon: Icon(
-                _isLiked ? Icons.favorite : Icons.favorite_border,
+                _isLiked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
                 color: _isLiked ? Colors.red : Colors.white,
+                size: 24,
               ),
-              onPressed: _toggleFavorite,
+              onPressed: _toggleLike,
             ),
           ),
           FadeTransition(
@@ -1318,7 +1189,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
                 return Stack(
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.shopping_cart, color: Colors.white),
+                      icon: const Icon(Icons.shopping_cart_rounded, color: Colors.white, size: 24),
                       onPressed: () => Navigator.pushNamed(context, '/cart'),
                     ),
                     if (cartProvider.items.isNotEmpty)
@@ -1326,15 +1197,12 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
                         right: 8,
                         top: 8,
                         child: Container(
-                          padding: const EdgeInsets.all(2),
+                          padding: const EdgeInsets.all(4),
                           decoration: BoxDecoration(
                             color: Colors.red,
-                            borderRadius: BorderRadius.circular(10),
+                            borderRadius: BorderRadius.circular(12),
                           ),
-                          constraints: const BoxConstraints(
-                            minWidth: 16,
-                            minHeight: 16,
-                          ),
+                          constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
                           child: Text(
                             '${cartProvider.items.length}',
                             style: GoogleFonts.poppins(
@@ -1356,124 +1224,211 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
       body: FadeTransition(
         opacity: _fadeAnimation,
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Product Images - FIXED: Shows images from both tables
-              SlideTransition(
-                position: _slideAnimation,
-                child: ScaleTransition(
+          child: SlideTransition(
+            position: _slideAnimation,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 16),
+                
+                // Carousel gambar yang indah
+                ScaleTransition(
                   scale: _scaleAnimation,
                   child: _buildImageCarousel(),
                 ),
-              ),
-
-              const SizedBox(height: 20),
-
-              // Product Info
-              SlideTransition(
-                position: _slideAnimation,
-                child: Container(
-                  padding: const EdgeInsets.all(16),
+                
+                const SizedBox(height: 24),
+                
+                // Info produk utama
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 16),
+                  padding: const EdgeInsets.all(24),
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(24),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withOpacity(0.08),
-                        blurRadius: 15,
-                        offset: const Offset(0, 3),
+                        blurRadius: 20,
+                        offset: const Offset(0, 8),
                       ),
                     ],
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // Brand badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[100],
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          _product!['brand'],
+                          style: GoogleFonts.poppins(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      
+                      // Nama produk
                       Text(
                         _product!['name'],
                         style: GoogleFonts.poppins(
-                          fontSize: 20,
+                          fontSize: 22,
                           fontWeight: FontWeight.bold,
                           color: const Color(0xFF333333),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _product!['brand'],
-                        style: GoogleFonts.poppins(
-                          fontSize: 12,
-                          color: Colors.grey[600],
+                          height: 1.3,
                         ),
                       ),
                       const SizedBox(height: 8),
+                      
+                      // Rating dan review count
+                      Row(
+                        children: [
+                          ...List.generate(5, (index) {
+                            return Icon(
+                              Icons.star_rounded,
+                              size: 18,
+                              color: index < _product!['rating'] 
+                                  ? Colors.amber 
+                                  : Colors.grey[300],
+                            );
+                          }),
+                          const SizedBox(width: 8),
+                          Text(
+                            '(${_productReviews.length} ulasan)',
+                            style: GoogleFonts.poppins(
+                              fontSize: 13,
+                              color: Colors.grey[600],
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      
+                      // Harga dengan desain menarik
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        padding: const EdgeInsets.all(20),
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
                             colors: [
-                              const Color(0xFFEC407A).withOpacity(0.1),
-                              const Color(0xFFF48FB1).withOpacity(0.1),
+                              const Color(0xFFEC407A).withOpacity(0.12),
+                              const Color(0xFFF48FB1).withOpacity(0.12),
                             ],
                           ),
-                          borderRadius: BorderRadius.circular(16),
+                          borderRadius: BorderRadius.circular(20),
                           border: Border.all(
                             color: const Color(0xFFEC407A).withOpacity(0.3),
                           ),
                         ),
-                        child: Text(
-                          'Rp ${_formatPrice(_getCurrentPrice())}',
-                          style: GoogleFonts.poppins(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                            color: const Color(0xFFEC407A),
-                          ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [const Color(0xFFEC407A), const Color(0xFFF48FB1)],
+                                ),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Icon(Icons.local_offer_rounded, color: Colors.white, size: 20),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Harga',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 12,
+                                      color: Colors.grey[600],
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  Text(
+                                    'Rp ${_formatPrice(_getCurrentPrice())}',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w800,
+                                      color: const Color(0xFFEC407A),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 24),
                       
-                      // Variants
-                      _buildVariantSelector(),
-                      
-                      // Quantity Selector
+                      // Quantity selector
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
-                            'Jumlah:',
-                            style: GoogleFonts.poppins(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Jumlah',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: const Color(0xFF333333),
+                                ),
+                              ),
+                              Text(
+                                'Pilih jumlah yang diinginkan',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 12,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                            ],
                           ),
                           Container(
                             decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: Colors.grey[300]!),
+                              color: Colors.grey[100],
+                              borderRadius: BorderRadius.circular(16),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.05),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 IconButton(
                                   onPressed: _quantity > 1 ? () => setState(() => _quantity--) : null,
-                                  icon: const Icon(Icons.remove, size: 18),
+                                  icon: const Icon(Icons.remove_rounded, size: 20),
                                   color: _quantity > 1 ? const Color(0xFFEC407A) : Colors.grey,
+                                  padding: const EdgeInsets.all(8),
                                 ),
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  padding: const EdgeInsets.symmetric(horizontal: 20),
                                   child: Text(
                                     _quantity.toString(),
                                     style: GoogleFonts.poppins(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700,
+                                      color: const Color(0xFF333333),
                                     ),
                                   ),
                                 ),
                                 IconButton(
                                   onPressed: () => setState(() => _quantity++),
-                                  icon: const Icon(Icons.add, size: 18),
+                                  icon: const Icon(Icons.add_rounded, size: 20),
                                   color: const Color(0xFFEC407A),
+                                  padding: const EdgeInsets.all(8),
                                 ),
                               ],
                             ),
@@ -1483,184 +1438,433 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
                     ],
                   ),
                 ),
-              ),
-
-              const SizedBox(height: 16),
-
-              // Product Details
-              SlideTransition(
-                position: _slideAnimation,
-                child: Container(
-                  padding: const EdgeInsets.all(16),
+                
+                const SizedBox(height: 20),
+                
+                // Selector varian
+                _buildVariantSelector(),
+                
+                const SizedBox(height: 20),
+                
+                // Deskripsi produk dan info jenis kulit
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 16),
+                  padding: const EdgeInsets.all(24),
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(24),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withOpacity(0.08),
-                        blurRadius: 15,
-                        offset: const Offset(0, 3),
+                        blurRadius: 20,
+                        offset: const Offset(0, 8),
                       ),
                     ],
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Deskripsi Produk',
-                        style: GoogleFonts.poppins(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: const Color(0xFF333333),
-                        ),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  const Color(0xFFEC407A).withOpacity(0.15),
+                                  const Color(0xFFF48FB1).withOpacity(0.15),
+                                ],
+                              ),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(
+                              Icons.description_rounded,
+                              color: const Color(0xFFEC407A),
+                              size: 22,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Deskripsi Produk',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: const Color(0xFF333333),
+                                  ),
+                                ),
+                                Text(
+                                  'Detail lengkap tentang produk',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 12,
+                                    color: Colors.grey[600],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 20),
                       Text(
                         _product!['description'],
                         style: GoogleFonts.poppins(
-                          fontSize: 12,
+                          fontSize: 14,
                           color: Colors.grey[700],
-                          height: 1.5,
+                          height: 1.7,
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 24),
                       
-                      // Skin Type Info
-                      if (_product!['skin_type'] != null && _product!['skin_type'].isNotEmpty)
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFEC407A).withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: const Color(0xFFEC407A).withOpacity(0.2),
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(6),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFEC407A),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Icon(
-                                  Icons.face,
-                                  color: Colors.white,
-                                  size: 16,
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Cocok untuk Jenis Kulit',
-                                      style: GoogleFonts.poppins(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      _getSkinTypeNames(_product!['skin_type']),
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 11,
-                                        color: Colors.grey[600],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                      // Info jenis kulit
+                      Container(
+  padding: const EdgeInsets.all(20),
+  decoration: BoxDecoration(
+    gradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [
+        const Color(0xFFEC407A).withOpacity(0.08),
+        const Color(0xFFF48FB1).withOpacity(0.08),
+      ],
+    ),
+    borderRadius: BorderRadius.circular(20),
+    border: Border.all(
+      color: const Color(0xFFEC407A).withOpacity(0.2),
+    ),
+  ),
+  child: Row(
+    children: [
+      Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [const Color(0xFFEC407A), const Color(0xFFF48FB1)],
+          ),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Icon(Icons.face_rounded, color: Colors.white, size: 20),
+      ),
+      const SizedBox(width: 16),
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Cocok untuk Jenis Kulit',
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
+                color: const Color(0xFF333333),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _getSkinTypeNames(),
+              style: GoogleFonts.poppins(
+                fontSize: 13,
+                color: const Color(0xFFEC407A),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ],
+  ),
+),
                     ],
                   ),
                 ),
-              ),
-
-              const SizedBox(height: 16),
-
-              // NEW: Review form (when shown)
-              if (_showReviewForm) ...[
-                SlideTransition(
-                  position: _slideAnimation,
-                  child: _buildReviewForm(),
+                
+                const SizedBox(height: 20),
+                
+                // Bagian Review
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 16),
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(24),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.08),
+                        blurRadius: 20,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      const Color(0xFFEC407A).withOpacity(0.15),
+                                      const Color(0xFFF48FB1).withOpacity(0.15),
+                                    ],
+                                  ),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Icon(
+                                  Icons.star_rounded,
+                                  color: const Color(0xFFEC407A),
+                                  size: 22,
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Ulasan Produk',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: const Color(0xFF333333),
+                                    ),
+                                  ),
+                                  Text(
+                                    '${_productReviews.length} ulasan',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 12,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                          OutlinedButton(
+                            onPressed: () => setState(() => _showReviewForm = !_showReviewForm),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFFEC407A),
+                              side: BorderSide(color: const Color(0xFFEC407A).withOpacity(0.5)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            ),
+                            child: Text(
+                              'Tulis Ulasan',
+                              style: GoogleFonts.poppins(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      
+                      // Daftar review
+                      if (_productReviews.isEmpty)
+                        Container(
+                          padding: const EdgeInsets.all(32),
+                          child: Column(
+                            children: [
+                              Icon(
+                                Icons.rate_review_outlined,
+                                size: 48,
+                                color: Colors.grey[400],
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                'Belum ada ulasan',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Jadilah yang pertama memberikan ulasan untuk produk ini!',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 13,
+                                  color: Colors.grey[500],
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        ...List.generate(_productReviews.length, (index) {
+                          final review = _productReviews[index];
+                          return Container(
+                            padding: const EdgeInsets.only(bottom: 20),
+                            margin: EdgeInsets.only(bottom: index < _productReviews.length - 1 ? 20 : 0),
+                            decoration: BoxDecoration(
+                              border: index < _productReviews.length - 1
+                                  ? Border(bottom: BorderSide(color: Colors.grey[200]!))
+                                  : null,
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  width: 48,
+                                  height: 48,
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      colors: [
+                                        const Color(0xFFEC407A).withOpacity(0.2),
+                                        const Color(0xFFF48FB1).withOpacity(0.2),
+                                      ],
+                                    ),
+                                    borderRadius: BorderRadius.circular(24),
+                                  ),
+                                  child: Icon(
+                                    Icons.person_rounded,
+                                    color: const Color(0xFFEC407A),
+                                    size: 24,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              review['user_name'],
+                                              style: GoogleFonts.poppins(
+                                                fontWeight: FontWeight.w600,
+                                                fontSize: 14,
+                                                color: const Color(0xFF333333),
+                                              ),
+                                            ),
+                                          ),
+                                          Row(
+                                            children: List.generate(5, (starIndex) {
+                                              return Icon(
+                                                Icons.star_rounded,
+                                                size: 14,
+                                                color: starIndex < review['rating'] 
+                                                    ? Colors.amber 
+                                                    : Colors.grey[300],
+                                              );
+                                            }),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        review['title'],
+                                        style: GoogleFonts.poppins(
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 13,
+                                          color: const Color(0xFF333333),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        review['comment'],
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 13,
+                                          color: Colors.grey[700],
+                                          height: 1.5,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        DateTime.parse(review['created']).toString().split(' ')[0],
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 11,
+                                          color: Colors.grey[500],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 16),
+                
+                const SizedBox(height: 20),
+                
+                // Form review (jika ditampilkan)
+                if (_showReviewForm) ...[
+                  _buildReviewForm(),
+                  const SizedBox(height: 20),
+                ],
+                
+                const SizedBox(height: 120), // Space untuk bottom button
               ],
-
-              // Reviews Section - UPDATED: Now includes review submission
-              SlideTransition(
-                position: _slideAnimation,
-                child: _buildReviewsSection(),
-              ),
-
-              const SizedBox(height: 80), // Space for floating button
-            ],
+            ),
           ),
         ),
       ),
       bottomNavigationBar: FadeTransition(
         opacity: _fadeAnimation,
         child: Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
             color: Colors.white,
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withOpacity(0.08),
                 blurRadius: 15,
-                offset: const Offset(0, -3),
+                offset: const Offset(0, -5),
               ),
             ],
           ),
           child: SafeArea(
             child: AnimatedBuilder(
-              animation: _pulseController,
+              animation: _bounceController,
               builder: (context, child) {
                 return Transform.scale(
-                  scale: _pulseAnimation.value,
+                  scale: _bounceAnimation.value,
                   child: Container(
                     width: double.infinity,
+                    height: 60,
                     decoration: BoxDecoration(
-                      gradient: LinearGradient(
+                      gradient: const LinearGradient(
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
-                        colors: [
-                          const Color(0xFFF48FB1),
-                          const Color(0xFFEC407A),
-                        ],
+                        colors: [Color(0xFFF48FB1), Color(0xFFEC407A)],
                       ),
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(20),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFFEC407A).withOpacity(0.3),
-                          blurRadius: 12,
-                          offset: const Offset(0, 3),
+                          color: const Color(0xFFEC407A).withOpacity(0.4),
+                          blurRadius: 20,
+                          offset: const Offset(0, 8),
                         ),
                       ],
                     ),
                     child: ElevatedButton.icon(
                       onPressed: _addToCart,
-                      icon: const Icon(Icons.shopping_cart_checkout, color: Colors.white, size: 18),
+                      icon: const Icon(Icons.shopping_cart_checkout_rounded, color: Colors.white, size: 22),
                       label: Text(
-                        'Add to Cart',
+                        'Add to Cart - Rp ${_formatPrice(_getCurrentPrice() * _quantity)}',
                         style: GoogleFonts.poppins(
                           color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 16,
                         ),
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.transparent,
                         shadowColor: Colors.transparent,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                       ),
                     ),
                   ),
